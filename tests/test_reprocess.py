@@ -67,12 +67,19 @@ def test_reprocess_resets_runs_recovers_failures_and_skips_active_jobs(
     with connection(settings) as conn:
         running = claim(conn, "busy", settings.job_lease_seconds)
         assert running is not None
-    finished = next(name for name in PROCESSORS if name != running.processor)
-    assert runs(client, headers, saved["id"])[finished]["status"] == "succeeded"
+    # Jobs of one item share a run_after, so run_once picked an arbitrary processor.
+    state = runs(client, headers, saved["id"])
+    finished = next(name for name, row in state.items() if row["status"] == "succeeded")
+    assert finished != running.processor
     result = {row["processor"]: row for row in client.post(path, headers=headers).json()}
     assert result[running.processor]["status"] == "running"
     assert result[running.processor]["attempts"] == 1
     assert result[finished]["status"] == "pending" and result[finished]["attempts"] == 0
+    assert all(
+        row["status"] == "pending" and row["attempts"] == 0
+        for name, row in result.items()
+        if name != running.processor
+    )
     with connection(settings) as conn:
         assert conn.execute("SELECT status FROM job WHERE id = %s", (running.id,)).fetchone() == {
             "status": "running"
