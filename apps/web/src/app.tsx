@@ -25,13 +25,12 @@ export function parseRoute(hash: string): Route {
 export function sharedText(pathname: string, search: string): string | null {
   if (pathname !== "/share") return null;
   const params = new URLSearchParams(search);
-  const url = params.get("url")?.trim();
-  const text = params.get("text")?.trim();
-  const title = params.get("title")?.trim();
+  const url = params.get("url")?.trim() ?? "";
+  const text = params.get("text")?.trim() ?? "";
+  const title = params.get("title")?.trim() ?? "";
   // Android often puts the URL into "text"; a bare URL is captured as a link.
-  const parts = [url || (text && /^https?:\/\/\S+$/i.test(text) ? text : null)];
-  if (!parts[0]) parts.push(title, text);
-  const joined = parts.filter((part): part is string => Boolean(part)).join("\n");
+  const link = url || (/^https?:\/\/\S+$/i.test(text) ? text : "");
+  const joined = (link ? [link] : [title, text]).filter(Boolean).join("\n");
   return joined || null;
 }
 
