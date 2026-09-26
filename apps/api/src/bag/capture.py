@@ -11,6 +11,7 @@ from bag.config import Settings
 from bag.db import Row, connection
 from bag.ids import uuid7
 from bag.jobs import reprocess, schedule
+from bag.organize import COLLECTIONS_SQL, TAGS_SQL, set_item_named
 from bag.schemas import (
     CaptureResponse,
     FileCapture,
@@ -182,8 +183,8 @@ def get_item(settings: Settings, owner_id: UUID, item_id: UUID) -> ItemResponse:
         row = conn.execute(
             "SELECT id, kind, source, title, content, user_note, mime_type, original_filename, "
             "content_hash, source_url, extracted_text, language, "
-            "processing_status, created_at, captured_at, updated_at FROM item "
-            "WHERE owner_id = %s AND id = %s AND deleted_at IS NULL",
+            f"processing_status, created_at, captured_at, updated_at, {TAGS_SQL}, "
+            f"{COLLECTIONS_SQL} FROM item WHERE owner_id = %s AND id = %s AND deleted_at IS NULL",
             (owner_id, item_id),
         ).fetchone()
     if row is None:
@@ -203,6 +204,12 @@ def update_item(
         ).fetchone()
         if row is None:
             raise HTTPException(404, "Item not found")
+        for kind in ("tag", "collection"):
+            names = changes.pop(f"{kind}s", None)
+            if names is not None:
+                set_item_named(conn, kind, owner_id, item_id, names)
+                changes.setdefault("_touched", True)
+        touched = changes.pop("_touched", False)
         assignments = [f"{column} = %({column})s" for column in changes]
         if "language" in changes:
             assignments.append(
@@ -210,9 +217,9 @@ def update_item(
                 if changes["language"] is not None
                 else "metadata = metadata #- '{language,user}'"
             )
-        if assignments:
+        if assignments or touched:
             conn.execute(
-                f"UPDATE item SET {', '.join(assignments)}, updated_at = now() "
+                f"UPDATE item SET {', '.join([*assignments, 'updated_at = now()'])} "
                 "WHERE owner_id = %(owner_id)s AND id = %(item_id)s",
                 {**changes, "owner_id": owner_id, "item_id": item_id},
             )

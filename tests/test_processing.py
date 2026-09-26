@@ -218,19 +218,24 @@ def test_lease_expiry_recovery_and_stale_results_are_discarded(
 
     # Repeated crashes are bounded: the reclaim after the final attempt fails the run.
     saved = client.post("/api/v1/capture/text", json={"content": "crashy"}, headers=headers).json()
+    crashed: set[str] = set()
     for _ in range(settings.job_max_attempts):
         with connection(settings) as conn:
             job = claim(conn, "crashed-worker", 1)
-            assert job is not None and job.processor == "mime_detect"
+            assert job is not None
+            crashed.add(job.processor)
             conn.execute(
                 "UPDATE job SET lease_expires_at = now() - interval '1 second' WHERE id = %s",
                 (job.id,),
             )
+    # The expired job keeps the smallest ID, so every reclaim hits the same processor.
+    assert len(crashed) == 1
     assert drain(worker) == len(PROCESSORS)
     result = runs(client, headers, saved["id"])
-    assert result["mime_detect"]["status"] == "failed"
-    assert result["mime_detect"]["last_error"] == "Lease expired after the final attempt"
-    assert result["text_extract"]["status"] == "succeeded"
+    failed = result[crashed.pop()]
+    assert failed["status"] == "failed"
+    assert failed["last_error"] == "Lease expired after the final attempt"
+    assert sum(1 for row in result.values() if row["status"] == "failed") == 1
     assert (
         client.get(f"/api/v1/items/{saved['id']}", headers=headers).json()["processing_status"]
         == "partial"

@@ -39,12 +39,15 @@ from bag.config import Settings
 from bag.db import ready
 from bag.download import download
 from bag.logging import configure_logging
+from bag.organize import Kind, create_named, list_named
 from bag.schemas import (
     CaptureResponse,
     FileCapture,
     ItemPage,
     ItemResponse,
     ItemUpdate,
+    NameCreate,
+    NamedResponse,
     ProcessingRunResponse,
     SearchPage,
     TextCapture,
@@ -185,20 +188,46 @@ def create_app(
     Filters = Annotated[str | None, Query(min_length=1, max_length=100, pattern=r"^[a-z_-]+$")]
     Limit = Annotated[int, Query(ge=1, le=100)]
 
+    Name = Annotated[str | None, Query(min_length=1, max_length=100)]
+
     def filter_params(
         kind: Filters = None,
         status: Filters = None,
         captured_from: Annotated[AwareDatetime | None, Query(alias="from")] = None,
         captured_to: Annotated[AwareDatetime | None, Query(alias="to")] = None,
         trashed: bool = False,
+        tag: Name = None,
+        collection: Name = None,
     ) -> dict[str, Any]:
+        for value in (tag, collection):
+            if value is not None and "\x00" in value:
+                raise HTTPException(422, "Invalid request")
         return {
             "kind": kind,
             "status": status,
             "captured_from": captured_from,
             "captured_to": captured_to,
             "trashed": trashed,
+            "tag": tag,
+            "collection": collection,
         }
+
+    def named_routes(kind: Kind) -> None:
+        @app.get(f"/api/v1/{kind}s", response_model=list[NamedResponse])
+        def listing(actor: Annotated[Identity, Depends(identity)]) -> list[NamedResponse]:
+            return list_named(settings, kind, actor.owner_id)
+
+        @app.post(f"/api/v1/{kind}s", response_model=NamedResponse, status_code=201)
+        def create(
+            payload: NameCreate, actor: Annotated[Identity, Depends(identity)], response: Response
+        ) -> NamedResponse:
+            named, created = create_named(settings, kind, actor.owner_id, payload.name)
+            if not created:
+                response.status_code = 200
+            return named
+
+    named_routes("tag")
+    named_routes("collection")
 
     @app.get("/api/v1/items", response_model=ItemPage)
     def items(

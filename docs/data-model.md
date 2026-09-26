@@ -21,7 +21,10 @@ connections use UTC. `user` is the ownership root; every other table has `owner_
 
 Composite `(owner_id, id)` keys and matching foreign keys prevent cross-owner
 associations. Tag provenance lives on each assignment, allowing user/system/AI
-assignments of the same vocabulary without confusing their origins.
+assignments of the same vocabulary without confusing their origins. Names are
+trimmed, 1–100 characters without control characters, unique per owner and
+case-sensitive; they are created on first use and never deleted yet. API edits
+write `created_by = user` and replace only user assignments.
 
 Token administration uses the existing `api_token` table, without migration. New
 tokens carry UUIDv7 IDs and names of 1–200 characters without ASCII control characters.

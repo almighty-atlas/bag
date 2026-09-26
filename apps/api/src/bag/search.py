@@ -4,12 +4,26 @@ from uuid import UUID
 
 from bag.config import Settings
 from bag.db import connection
+from bag.organize import COLLECTIONS_SQL, TAGS_SQL
 from bag.schemas import ItemPage, ItemSummary, SearchPage, SearchResult
 
 SUMMARY_COLUMNS = (
     "id, kind, source, title, user_note, mime_type, original_filename, source_url, language, "
-    "processing_status, created_at, captured_at, updated_at, deleted_at"
+    f"processing_status, created_at, captured_at, updated_at, deleted_at, {TAGS_SQL}, "
+    f"{COLLECTIONS_SQL}"
 )
+NAMED_FILTER = {
+    "tag": (
+        "EXISTS (SELECT 1 FROM item_tag l JOIN tag n ON (n.owner_id = l.owner_id "
+        "AND n.id = l.tag_id) WHERE l.owner_id = item.owner_id AND l.item_id = item.id "
+        "AND n.name = %(tag)s)"
+    ),
+    "collection": (
+        "EXISTS (SELECT 1 FROM item_collection l JOIN collection n ON (n.owner_id = l.owner_id "
+        "AND n.id = l.collection_id) WHERE l.owner_id = item.owner_id AND l.item_id = item.id "
+        "AND n.name = %(collection)s)"
+    ),
+}
 # Query every configuration: a German query stems for German items, English for
 # English ones, and simple matches exact tokens in items without a language.
 QUERY_SQL = (
@@ -31,10 +45,16 @@ def _filters(
     captured_from: datetime | None,
     captured_to: datetime | None,
     trashed: bool,
+    tag: str | None = None,
+    collection: str | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
-    clauses = ["owner_id = %(owner_id)s"]
+    clauses = ["item.owner_id = %(owner_id)s"]
     params: dict[str, Any] = {"owner_id": owner_id}
     clauses.append("deleted_at IS NOT NULL" if trashed else "deleted_at IS NULL")
+    for name, value in (("tag", tag), ("collection", collection)):
+        if value is not None:
+            clauses.append(NAMED_FILTER[name])
+            params[name] = value
     if kind is not None:
         clauses.append("kind = %(kind)s")
         params["kind"] = kind
@@ -61,6 +81,8 @@ def list_items(
     captured_from: datetime | None = None,
     captured_to: datetime | None = None,
     trashed: bool = False,
+    tag: str | None = None,
+    collection: str | None = None,
 ) -> ItemPage:
     clauses, params = _filters(
         owner_id,
@@ -69,6 +91,8 @@ def list_items(
         captured_from=captured_from,
         captured_to=captured_to,
         trashed=trashed,
+        tag=tag,
+        collection=collection,
     )
     if cursor is not None:
         # UUIDv7 keys are time-ordered, so keyset pagination follows capture order.
@@ -98,6 +122,8 @@ def search_items(
     captured_from: datetime | None = None,
     captured_to: datetime | None = None,
     trashed: bool = False,
+    tag: str | None = None,
+    collection: str | None = None,
 ) -> SearchPage:
     clauses, params = _filters(
         owner_id,
@@ -106,6 +132,8 @@ def search_items(
         captured_from=captured_from,
         captured_to=captured_to,
         trashed=trashed,
+        tag=tag,
+        collection=collection,
     )
     clauses.append(f"search_vector @@ {QUERY_SQL}")
     params.update({"q": q, "limit": limit + 1, "offset": offset})

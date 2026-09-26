@@ -8,7 +8,8 @@ Phase 2 has a leased PostgreSQL job queue, a worker with bounded retries and rec
 `mime_detect`/`text_extract`/`language` processors, a derived item status,
 reprocessing through the API and `bag reprocess`, list/search endpoints with
 filters, ranking and snippets, idempotent trash/restore, explicit `bag purge`
-and `bag gc` maintenance commands, and editing of title, note and language.
+and `bag gc` maintenance commands, editing of title, note and language, and tags
+and collections with filters.
 
 ## Phase 2 — Processing and search
 
@@ -16,8 +17,7 @@ and `bag gc` maintenance commands, and editing of title, note and language.
       redirect revalidation and size/time limits before enabling a `url_fetch` processor.
 - [ ] Add `metadata` and `image_meta` processors (basic file/image metadata) and
       decide on PDF text extraction in an ADR before adding a dependency.
-- [ ] Add tag and collection APIs and the corresponding `tag`/`collection` filters
-      on list and search.
+- [ ] Add rename/delete for tags and collections (assignments must go with them).
 - [ ] Prune completed `job` rows after a retention period.
 - [ ] Decide whether the worker should run `purge`/`gc` on a schedule or leave it to cron.
 - [ ] Implement export of originals and JSONL metadata through the API.

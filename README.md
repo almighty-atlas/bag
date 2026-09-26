@@ -165,6 +165,22 @@ curl --fail-with-body -sS -X PATCH "http://localhost:8000/api/v1/items/$ITEM_ID"
 
 Content, kind and extracted text cannot be edited; originals stay as captured.
 
+Tags and collections are plain names. Send the complete list you want on the
+item; unknown names are created, and an empty list removes your assignments:
+
+```sh
+curl --fail-with-body -sS -X PATCH "http://localhost:8000/api/v1/items/$ITEM_ID" \
+  -H "Authorization: Bearer $BAG_TOKEN" -H 'Content-Type: application/json' \
+  --data '{"tags":["wohnung","todo"],"collections":["Umzug 2026"]}'
+curl --fail-with-body -sS "http://localhost:8000/api/v1/tags" -H "Authorization: Bearer $BAG_TOKEN"
+curl --fail-with-body -sS "http://localhost:8000/api/v1/items?tag=todo" \
+  -H "Authorization: Bearer $BAG_TOKEN"
+```
+
+`GET /api/v1/tags` and `/api/v1/collections` list names with item counts;
+`POST` with `{"name": "..."}` creates one ahead of time. Both filters also work on
+`/api/v1/search`.
+
 ## Trash and restore
 
 Deleting moves an item to the trash: it vanishes from listings, search, detail and

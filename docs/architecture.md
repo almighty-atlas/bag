@@ -89,8 +89,14 @@ for all live items of an owner, by default only for processors without a run (it
 from before the queue existed or newly registered processors), optionally for failed
 runs or everything.
 
-`PATCH /api/v1/items/{id}` edits `title`, `user_note` and `language` of a live item
-under a row lock; absent fields stay, null clears. Choosing a language sets
+`PATCH /api/v1/items/{id}` edits `title`, `user_note`, `language`, `tags` and
+`collections` of a live item under a row lock; absent fields stay, null clears.
+Tag and collection lists are set semantics over names: missing names are created
+for the owner, the user's previous assignments not in the list are removed, and
+system or AI tag assignments are never touched. `GET`/`POST /api/v1/tags` and
+`/api/v1/collections` list names with live item counts or create a name
+idempotently (201 new, 200 existing). Item responses and summaries carry sorted
+`tags` and `collections`; listing and search accept `tag` and `collection` filters. Choosing a language sets
 `metadata.language.user`, which the detector honors, and clearing it removes the
 marker so the next run may detect again. Originals, kind and extraction stay
 read-only. `DELETE /api/v1/items/{id}` sets `deleted_at` and `POST /api/v1/items/{id}/restore`

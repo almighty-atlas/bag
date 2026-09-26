@@ -57,6 +57,34 @@ class UrlCapture(CaptureMetadata):
         return value
 
 
+def valid_name(value: str) -> str:
+    value = value.strip()
+    if not value or len(value) > 100:
+        raise ValueError("Name must be 1–100 characters")
+    if any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise ValueError("Name must not contain control characters")
+    value.encode("utf-8")
+    return value
+
+
+class NameCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def checked(cls, value: str) -> str:
+        return valid_name(value)
+
+
+class NamedResponse(BaseModel):
+    id: UUID
+    name: str
+    created_at: datetime
+    item_count: int
+
+
 class ItemUpdate(BaseModel):
     """Fields a user may edit; absent fields stay unchanged, null clears."""
 
@@ -65,11 +93,20 @@ class ItemUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=500)
     user_note: str | None = None
     language: Literal["de", "en"] | None = None
+    tags: list[str] | None = Field(default=None, max_length=100)
+    collections: list[str] | None = Field(default=None, max_length=100)
 
     @field_validator("title", "user_note")
     @classmethod
     def postgres_text(cls, value: str | None) -> str | None:
         return CaptureMetadata.postgres_text(value)
+
+    @field_validator("tags", "collections")
+    @classmethod
+    def checked_names(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        return sorted({valid_name(name) for name in value})
 
 
 class CaptureResponse(BaseModel):
@@ -92,6 +129,8 @@ class ItemResponse(BaseModel):
     content_hash: str | None
     extracted_text: str | None
     language: str | None
+    tags: list[str]
+    collections: list[str]
     processing_status: str
     created_at: datetime
     captured_at: datetime
@@ -108,6 +147,8 @@ class ItemSummary(BaseModel):
     original_filename: str | None
     source_url: str | None
     language: str | None
+    tags: list[str]
+    collections: list[str]
     processing_status: str
     created_at: datetime
     captured_at: datetime
