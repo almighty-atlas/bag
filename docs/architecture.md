@@ -99,7 +99,9 @@ address, redirects are re-checked, size and time are bounded. It stores the page
 as a `snapshot` blob, sets `mime_type` from the declared type, extracts HTML or
 plain text into `extracted_text` and fills an empty `title` from the HTML title.
 Outcomes may also carry `defaults` (applied only where NULL) and derived blobs
-(one row per role, replaced on rerun). No PDF or image extraction exists. Because
+(one row per role, replaced on rerun). `image_meta` reads width and height from
+PNG, GIF, JPEG and WebP headers into `metadata.image_meta` without decoding
+(ADR-0018). No PDF text extraction exists yet. Because
 `search_vector` is a generated column, extraction and language immediately make
 items searchable with the right stemmer. Every capture enqueues all processors
 regardless of kind; the worker log records claim and outcome with job, item, owner
@@ -121,7 +123,9 @@ Tag and collection lists are set semantics over names: missing names are created
 for the owner, the user's previous assignments not in the list are removed, and
 system or AI tag assignments are never touched. `GET`/`POST /api/v1/tags` and
 `/api/v1/collections` list names with live item counts or create a name
-idempotently (201 new, 200 existing). Item responses and summaries carry sorted
+idempotently (201 new, 200 existing); `PATCH`/`DELETE /api/v1/{tags,collections}/{id}`
+rename (409 on a clash) or delete a name together with its assignments, never
+the items. Item responses and summaries carry sorted
 `tags` and `collections`; listing and search accept `tag` and `collection` filters. Choosing a language sets
 `metadata.language.user`, which the detector honors, and clearing it removes the
 marker so the next run may detect again. Originals, kind and extraction stay

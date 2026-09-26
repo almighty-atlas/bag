@@ -17,6 +17,12 @@ from helpers import drain, runs
 
 pytestmark = pytest.mark.integration
 PDF = b"%PDF-1.4\n%original\x00\xff\n%%EOF\n"
+PNG_HEADER = (
+    b"\x89PNG\r\n\x1a\n"
+    + b"\x00\x00\x00\x0dIHDR"
+    + (640).to_bytes(4, "big")
+    + (480).to_bytes(4, "big")
+)
 
 
 @pytest.fixture
@@ -47,7 +53,7 @@ def test_capture_enqueues_transactionally_and_worker_enriches_text(
     assert item["mime_type"] == "text/plain" and item["updated_at"] > item["created_at"]
     done = runs(client, headers, saved["id"])
     for name, run in done.items():
-        expected = "skipped" if name == "url_fetch" else "succeeded"
+        expected = "skipped" if name in {"url_fetch", "image_meta"} else "succeeded"
         assert run["status"] == expected and run["attempts"] == 1
         assert run["last_error"] is None and run["started_at"] and run["finished_at"]
     with connection(settings) as conn:
@@ -76,6 +82,7 @@ def test_file_kinds_text_files_urls_and_truncation(
         return str(response.json()["id"])
 
     pdf = upload("x.png", PDF)
+    png = upload("photo.bin", PNG_HEADER + b"\x00" * 64)
     text = upload("notes.bin", "Gedanken über Wayland 💼\r\n\tTab".encode())
     binary = upload("junk.txt", b"\x00\x01\x02\xff" * 10, "text/plain")
     long = upload("long.txt", b"abc " * 300_000)
@@ -88,6 +95,14 @@ def test_file_kinds_text_files_urls_and_truncation(
     assert item["kind"] == "document" and item["mime_type"] == "application/pdf"
     assert item["processing_status"] == "ready" and item["extracted_text"] is None
     assert runs(client, headers, pdf)["text_extract"]["status"] == "skipped"
+    assert runs(client, headers, pdf)["image_meta"]["status"] == "skipped"
+
+    item = client.get(f"/api/v1/items/{png}", headers=headers).json()
+    assert item["kind"] == "image" and item["mime_type"] == "image/png"
+    assert runs(client, headers, png)["image_meta"]["status"] == "succeeded"
+    with connection(settings) as conn:
+        row = conn.execute("SELECT metadata FROM item WHERE id = %s", (png,)).fetchone()
+        assert row is not None and row["metadata"]["image_meta"] == {"width": 640, "height": 480}
 
     item = client.get(f"/api/v1/items/{text}", headers=headers).json()
     assert item["kind"] == "file" and item["mime_type"] == "text/plain"

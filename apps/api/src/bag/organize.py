@@ -71,6 +71,34 @@ def _list(
     return [NamedResponse.model_validate(row) for row in rows]
 
 
+def rename_named(
+    settings: Settings, kind: Kind, owner_id: UUID, named_id: UUID, name: str
+) -> NamedResponse | None:
+    """Rename; None when the ID is not the owner's. Raises UniqueViolation on a clash."""
+    with connection(settings) as conn:
+        row = conn.execute(
+            f"UPDATE {kind} SET name = %s WHERE owner_id = %s AND id = %s RETURNING id",
+            (name, owner_id, named_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return _list(conn, kind, owner_id, named_id)[0]
+
+
+def delete_named(settings: Settings, kind: Kind, owner_id: UUID, named_id: UUID) -> bool:
+    """Remove a name and all its assignments; items themselves are untouched."""
+    link, column = LINK[kind]
+    with connection(settings) as conn:
+        conn.execute(
+            f"DELETE FROM {link} WHERE owner_id = %s AND {column} = %s", (owner_id, named_id)
+        )
+        row = conn.execute(
+            f"DELETE FROM {kind} WHERE owner_id = %s AND id = %s RETURNING id",
+            (owner_id, named_id),
+        ).fetchone()
+        return row is not None
+
+
 def set_item_named(
     conn: psycopg.Connection[Row],
     kind: Kind,

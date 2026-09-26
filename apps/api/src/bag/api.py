@@ -41,7 +41,7 @@ from bag.config import Settings
 from bag.db import connection, ready
 from bag.download import download
 from bag.logging import configure_logging
-from bag.organize import Kind, create_named, list_named
+from bag.organize import Kind, create_named, delete_named, list_named, rename_named
 from bag.ratelimit import FailureLimiter
 from bag.schemas import (
     CaptureResponse,
@@ -342,6 +342,24 @@ def create_app(
             if not created:
                 response.status_code = 200
             return named
+
+        @app.patch(f"/api/v1/{kind}s/{{named_id}}", response_model=NamedResponse)
+        def rename(
+            named_id: UUID, payload: NameCreate, actor: Annotated[Identity, Depends(identity)]
+        ) -> NamedResponse:
+            try:
+                renamed = rename_named(settings, kind, actor.owner_id, named_id, payload.name)
+            except psycopg.errors.UniqueViolation as exc:
+                raise HTTPException(409, f"A {kind} with that name already exists") from exc
+            if renamed is None:
+                raise HTTPException(404, f"{kind.capitalize()} not found")
+            return renamed
+
+        @app.delete(f"/api/v1/{kind}s/{{named_id}}", status_code=204)
+        def remove(named_id: UUID, actor: Annotated[Identity, Depends(identity)]) -> Response:
+            if not delete_named(settings, kind, actor.owner_id, named_id):
+                raise HTTPException(404, f"{kind.capitalize()} not found")
+            return Response(status_code=204)
 
     named_routes("tag")
     named_routes("collection")

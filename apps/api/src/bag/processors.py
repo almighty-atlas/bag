@@ -1,37 +1,45 @@
 import codecs
 import re
+import struct
 from dataclasses import dataclass
 
 import filetype
 
 from bag.fetch import UrlFetcher
 from bag.processing import (
-    MAX_EXTRACTED_BYTES as MAX_EXTRACTED_BYTES,
-)
-from bag.processing import (
-    SKIPPED as SKIPPED,
-)
-from bag.processing import (
-    Outcome as Outcome,
-)
-from bag.processing import (
-    ProcessingItem as ProcessingItem,
-)
-from bag.processing import (
-    Processor as Processor,
-)
-from bag.processing import (
-    ProcessorError as ProcessorError,
-)
-from bag.processing import (
-    SnapshotBlob as SnapshotBlob,
-)
-from bag.processing import (
-    is_plain_text as is_plain_text,
+    MAX_EXTRACTED_BYTES,
+    SKIPPED,
+    Outcome,
+    ProcessingItem,
+    Processor,
+    ProcessorError,
+    SnapshotBlob,
+    is_plain_text,
 )
 from bag.storage import BlobStorage, StorageError
 
 SIGNATURE_BYTES = 8192
+# Re-exported for processors' callers and tests; the contract lives in bag.processing.
+__all__ = [
+    "MAX_EXTRACTED_BYTES",
+    "PROCESSORS",
+    "SKIPPED",
+    "Outcome",
+    "ProcessingItem",
+    "Processor",
+    "ProcessorError",
+    "SnapshotBlob",
+    "detect_language",
+    "image_dimensions",
+    "image_meta",
+    "is_plain_text",
+    "kind_for",
+    "language",
+    "looks_like_text",
+    "mime_detect",
+    "sniff_mime",
+    "text_extract",
+]
 
 
 def kind_for(mime_type: str) -> str:
@@ -167,9 +175,79 @@ def language(item: ProcessingItem, storage: BlobStorage) -> Outcome:
     return Outcome("succeeded", {"language": detected}, {"detected": detected})
 
 
+def image_dimensions(data: bytes) -> tuple[int, int] | None:
+    """Width and height from the header of PNG, GIF, JPEG or WebP data, else None."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR":
+        return struct.unpack(">II", data[16:24])
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return struct.unpack("<HH", data[6:10])
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        chunk = data[12:16]
+        if chunk == b"VP8X":
+            width = int.from_bytes(data[24:27], "little") + 1
+            height = int.from_bytes(data[27:30], "little") + 1
+            return width, height
+        if chunk == b"VP8L" and len(data) >= 25:
+            bits = int.from_bytes(data[21:25], "little")
+            return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+        if chunk == b"VP8 " and len(data) >= 30:
+            width, height = struct.unpack("<HH", data[26:30])
+            return width & 0x3FFF, height & 0x3FFF
+    if data[:2] == b"\xff\xd8":
+        offset = 2
+        while offset + 9 < len(data):
+            if data[offset] != 0xFF:
+                return None
+            marker = data[offset + 1]
+            if marker in {0xD8, 0x01} or 0xD0 <= marker <= 0xD7:
+                offset += 2
+                continue
+            length = struct.unpack(">H", data[offset + 2 : offset + 4])[0]
+            if marker in {
+                0xC0,
+                0xC1,
+                0xC2,
+                0xC3,
+                0xC5,
+                0xC6,
+                0xC7,
+                0xC9,
+                0xCA,
+                0xCB,
+                0xCD,
+                0xCE,
+                0xCF,
+            }:
+                height, width = struct.unpack(">HH", data[offset + 5 : offset + 9])
+                return width, height
+            offset += 2 + length
+    return None
+
+
+IMAGE_HEADER_BYTES = 64 * 1024
+
+
+def image_meta(item: ProcessingItem, storage: BlobStorage) -> Outcome:
+    if item.original is None:
+        return SKIPPED
+    try:
+        with storage.open_verified(item.original) as source:
+            data = source.read(IMAGE_HEADER_BYTES)
+    except StorageError as exc:
+        raise ProcessorError("Original unavailable or failed its integrity check") from exc
+    if not sniff_mime(data[:SIGNATURE_BYTES]).startswith("image/"):
+        return SKIPPED
+    dimensions = image_dimensions(data)
+    if dimensions is None or min(dimensions) <= 0:
+        return Outcome("skipped", metadata={"dimensions": None})
+    width, height = dimensions
+    return Outcome("succeeded", metadata={"width": width, "height": height})
+
+
 PROCESSORS: dict[str, Processor] = {
     "mime_detect": mime_detect,
     "text_extract": text_extract,
     "language": language,
     "url_fetch": UrlFetcher(),
+    "image_meta": image_meta,
 }

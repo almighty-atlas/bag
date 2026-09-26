@@ -88,12 +88,13 @@ docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api b
 docker compose --env-file .env -f deploy/compose/compose.yaml up -d bag-api bag-worker
 ```
 
-Every capture schedules three processors in the same transaction as the item:
+Every capture schedules the processors in the same transaction as the item:
 `mime_detect` verifies the type from stored bytes, `text_extract` fills
-`extracted_text` for text captures and UTF-8 text files (up to 1 MiB), and
-`language` sets `de` or `en` when the text clearly reads as German or English, which
-selects the stemmer for search. PDFs, images, other binaries and URLs are stored
-unchanged and skipped by extraction and detection. The worker
+`extracted_text` for text captures and UTF-8 text files (up to 1 MiB),
+`language` sets `de` or `en` when the text clearly reads as German or English
+(which selects the stemmer for search), `url_fetch` archives saved links and
+`image_meta` records image dimensions from the file header. PDFs and other
+binaries are stored unchanged and skipped by extraction. The worker
 claims one job at a time, retries failures with exponential backoff up to
 `BAG_JOB_MAX_ATTEMPTS`, and takes over jobs whose lease (`BAG_JOB_LEASE_SECONDS`)
 expired after a crash. Originals are never modified by processing.
@@ -178,8 +179,9 @@ curl --fail-with-body -sS "http://localhost:8000/api/v1/items?tag=todo" \
 ```
 
 `GET /api/v1/tags` and `/api/v1/collections` list names with item counts;
-`POST` with `{"name": "..."}` creates one ahead of time. Both filters also work on
-`/api/v1/search`.
+`POST` with `{"name": "..."}` creates one ahead of time, `PATCH /api/v1/tags/{id}`
+renames and `DELETE` removes a name with its assignments (items stay). Both
+filters also work on `/api/v1/search`.
 
 ## Trash and restore
 

@@ -11,6 +11,7 @@ from bag.processors import (
     ProcessingItem,
     ProcessorError,
     detect_language,
+    image_dimensions,
     kind_for,
     language,
     looks_like_text,
@@ -131,6 +132,33 @@ def test_language_processor_respects_user_choice(tmp_path: Path) -> None:
         uuid7(), uuid7(), "text", None, ENGLISH, None, {"language": {"user": True}}
     )
     assert language(chosen, storage).status == "skipped"
+
+
+def test_image_dimensions_from_headers() -> None:
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + b"\x00\x00\x00\x0dIHDR"
+        + (640).to_bytes(4, "big")
+        + (480).to_bytes(4, "big")
+    )
+    gif = b"GIF89a" + (320).to_bytes(2, "little") + (200).to_bytes(2, "little")
+    jpeg = (
+        b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+        b"\xff\xc0\x00\x11\x08" + (100).to_bytes(2, "big") + (250).to_bytes(2, "big") + b"\x03"
+    )
+    webp_x = (
+        b"RIFF\x00\x00\x00\x00WEBPVP8X"
+        + b"\x00" * 8
+        + (799).to_bytes(3, "little")
+        + (599).to_bytes(3, "little")
+    )
+    assert image_dimensions(png) == (640, 480)
+    assert image_dimensions(gif) == (320, 200)
+    assert image_dimensions(jpeg) == (250, 100)
+    assert image_dimensions(webp_x) == (800, 600)
+    assert image_dimensions(b"\xff\xd8\xff\xe0\x00") is None
+    assert image_dimensions(PDF) is None
+    assert image_dimensions(b"") is None
 
 
 def test_worker_loop_survives_database_outage_and_stops() -> None:

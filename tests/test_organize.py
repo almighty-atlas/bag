@@ -93,6 +93,26 @@ def test_tags_and_collections_assign_filter_and_count(
     assert tags["todo"] == 0
     assert item_ids(client, headers, "/api/v1/items?tag=todo&trashed=true") == [second_id]
 
+    # Rename keeps assignments; a clash is a conflict; delete removes assignments only.
+    listed = {row["name"]: row["id"] for row in client.get("/api/v1/tags", headers=headers).json()}
+    renamed = client.patch(
+        f"/api/v1/tags/{listed['auto']}", json={"name": "Automatik"}, headers=headers
+    )
+    assert renamed.status_code == 200 and renamed.json()["item_count"] == 1
+    assert client.get(f"/api/v1/items/{first_id}", headers=headers).json()["tags"] == ["Automatik"]
+    clash = client.patch(f"/api/v1/tags/{listed['auto']}", json={"name": "todo"}, headers=headers)
+    assert clash.status_code == 409
+    assert client.delete(f"/api/v1/tags/{listed['auto']}", headers=headers).status_code == 204
+    assert client.get(f"/api/v1/items/{first_id}", headers=headers).json()["tags"] == []
+    assert client.get(f"/api/v1/items/{first_id}", headers=headers).status_code == 200
+    assert client.delete(f"/api/v1/tags/{listed['auto']}", headers=headers).status_code == 404
+    assert "Automatik" not in {
+        row["name"] for row in client.get("/api/v1/tags", headers=headers).json()
+    }
+    collection_id = client.get("/api/v1/collections", headers=headers).json()[0]["id"]
+    assert client.delete(f"/api/v1/collections/{collection_id}", headers=headers).status_code == 204
+    assert client.get("/api/v1/collections", headers=headers).json() == []
+
 
 def test_organize_validation_and_scoping(
     settings: Settings,
@@ -135,7 +155,13 @@ def test_organize_validation_and_scoping(
     assert client.get("/api/v1/tags", headers=foreign).json() == []
     assert client.get("/api/v1/collections", headers=foreign).json() == []
     assert item_ids(client, foreign, "/api/v1/items?tag=secret") == []
-    # The same name is a separate tag per owner.
+    # The same name is a separate tag per owner, and foreign IDs cannot be renamed or deleted.
     mirrored = client.post("/api/v1/tags", json={"name": "secret"}, headers=foreign)
     assert mirrored.status_code == 201
-    assert mirrored.json()["id"] != client.get("/api/v1/tags", headers=headers).json()[0]["id"]
+    mine = client.get("/api/v1/tags", headers=headers).json()[0]["id"]
+    assert mirrored.json()["id"] != mine
+    assert (
+        client.patch(f"/api/v1/tags/{mine}", json={"name": "x"}, headers=foreign).status_code == 404
+    )
+    assert client.delete(f"/api/v1/tags/{mine}", headers=foreign).status_code == 404
+    assert client.get(f"/api/v1/items/{saved['id']}", headers=headers).json()["tags"] == ["secret"]

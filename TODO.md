@@ -13,9 +13,7 @@ collections with filters, and `bag export`.
 
 ## Phase 2 — Processing and search
 
-- [ ] Add `metadata` and `image_meta` processors (basic file/image metadata) and
-      decide on PDF text extraction in an ADR before adding a dependency.
-- [ ] Add rename/delete for tags and collections (assignments must go with them).
+- [ ] Add a `pdf_text` processor with `pypdf` as decided in ADR-0018.
 - [ ] Decide whether the worker should run `purge`/`gc` on a schedule or leave it to cron.
 - [ ] Add `bag import <dir>` reading export format version 1, idempotent by item ID.
 
