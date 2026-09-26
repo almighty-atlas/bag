@@ -8,8 +8,8 @@ Phase 2 has a leased PostgreSQL job queue, a worker with bounded retries and rec
 `mime_detect`/`text_extract`/`language` processors, a derived item status,
 reprocessing through the API and `bag reprocess`, list/search endpoints with
 filters, ranking and snippets, idempotent trash/restore, explicit `bag purge`
-and `bag gc` maintenance commands, editing of title, note and language, and tags
-and collections with filters.
+and `bag gc` maintenance commands, editing of title, note and language, tags and
+collections with filters, and `bag export`.
 
 ## Phase 2 — Processing and search
 
@@ -20,7 +20,7 @@ and collections with filters.
 - [ ] Add rename/delete for tags and collections (assignments must go with them).
 - [ ] Prune completed `job` rows after a retention period.
 - [ ] Decide whether the worker should run `purge`/`gc` on a schedule or leave it to cron.
-- [ ] Implement export of originals and JSONL metadata through the API.
+- [ ] Add `bag import <dir>` reading export format version 1, idempotent by item ID.
 
 ## Later phases
 

@@ -119,6 +119,10 @@ for good, including their capture keys, so a later replay of that key creates a
 new item. Physical objects outlive blob rows until `bag gc` finds no reference in
 any owner's blob rows.
 
+The export format (ADR-0014) serializes these tables per owner as JSONL with
+string IDs and ISO 8601 timestamps; tag assignments keep `created_by` and
+`confidence` so provenance survives a round trip.
+
 `bag migrate` runs packaged migration assets, including in installed wheels.
 Downgrades drop tables and are destructive; use only on disposable test databases.
 Back up real data before migrations. Updating to `0002_jobs` or later requires running

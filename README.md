@@ -353,6 +353,25 @@ uv run uvicorn bag.api:create_app --factory --reload --no-access-log
 uv run bag worker
 ```
 
+## Export
+
+`bag export <dir>` writes a complete, offline-readable copy of one user's Bag into
+an empty directory: `manifest.json`, `items.jsonl` (including trashed items and
+text originals), `blobs.jsonl`, `tags.jsonl`, `collections.jsonl`,
+`relations.jsonl`, `processing_runs.jsonl` and `objects/<sha256>` for every stored
+original. Every object is verified against its hash while copying; a corrupt
+original aborts the export. With Compose, export into a mounted host directory:
+
+```sh
+mkdir -p ./export && docker compose --env-file .env -f deploy/compose/compose.yaml run --rm \
+  -v "$PWD/export:/export" bag-api bag export /export/$(date +%Y-%m-%d)
+```
+
+The format is versioned (`version: 1`) and documented in
+`docs/decisions/0014-export-format.md`; a later `bag import` will read it. The
+export is not a substitute for the database dump plus storage archive described
+below, but it is the portable copy you can read without Bag of Holding.
+
 ## Deployment and backup
 
 Configuration is documented in [`.env.example`](.env.example). Replace development

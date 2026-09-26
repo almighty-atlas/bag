@@ -111,6 +111,12 @@ while re-checking references, so it waits for in-flight captures and can never
 remove an object a capture is publishing. Both are explicit commands, not
 scheduled background jobs.
 
+`bag export <dir>` snapshots one owner's tables in a repeatable-read transaction
+into JSONL files plus a manifest, then copies every referenced original through the
+verified reader into `objects/<sha256>` with fsync. Trashed items are included;
+the generated search vector is not. The target must be empty, and any failed
+verification aborts the run before the manifest is written.
+
 ## Listing and search
 
 `GET /api/v1/items` returns owner-scoped summaries (no `content` or

@@ -16,6 +16,7 @@ from bag.api import create_app
 from bag.auth import token_hash
 from bag.config import Settings
 from bag.db import connection
+from bag.export import ExportError, export_bag
 from bag.ids import uuid7
 from bag.jobs import Scope, reprocess
 from bag.maintenance import collect_garbage, purge_items
@@ -103,8 +104,24 @@ def main() -> None:
     gc_parser = commands.add_parser("gc", help="Remove unreferenced storage objects")
     gc_parser.add_argument("--min-age-hours", type=float, default=1.0)
     gc_parser.add_argument("--dry-run", action="store_true")
+    export_parser = commands.add_parser("export", help="Write originals and JSONL metadata")
+    export_parser.add_argument("directory", type=Path, help="Empty or missing target directory")
+    export_parser.add_argument("--owner", type=UUID, help="Required if multiple owners exist")
     args = parser.parse_args()
-    if args.command in ("purge", "gc"):
+    if args.command == "export":
+        try:
+            settings = Settings()
+            result = export_bag(
+                settings, FileSystemStorage(settings.storage_path), args.directory, args.owner
+            )
+            print(json.dumps(result))
+        except (ExportError, TokenAdminError) as exc:
+            parser.exit(1, f"{exc}\n")
+        except StorageError:
+            parser.exit(1, "An original failed verification; export aborted.\n")
+        except psycopg.Error:
+            parser.exit(1, "Database operation failed; export aborted.\n")
+    elif args.command in ("purge", "gc"):
         try:
             settings = Settings()
             if args.command == "purge":
