@@ -202,7 +202,10 @@ remove objects just because one request failed.
 Foundational domain tables without HTTP APIs are reserved for later slices.
 README documents exact startup, update and backup commands.
 
-CI uses actual PostgreSQL 17 for persistence, parallel text/file capture, ownership,
+`scripts/e2e.sh` boots a throwaway Compose stack (own project, ports and volumes),
+exercises login, capture, processing, search, download, trash, restore, tokens and
+export through the web proxy, prints service logs on failure and always tears
+down. CI uses actual PostgreSQL 17 for persistence, parallel text/file capture, ownership,
 commit failure, bootstrap and migration round trips. Storage tests exercise atomic
 publication, fsync failure, corruption, size limits and racing writers. Download
 disconnects are tested. Processing tests cover transactional enqueue, enrichment of

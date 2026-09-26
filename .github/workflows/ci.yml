@@ -40,3 +40,6 @@ jobs:
       - run: npm run build
         working-directory: apps/web
       - run: docker build -f deploy/compose/Dockerfile.web -t bag-web:ci .
+      - run: scripts/e2e.sh
+        env:
+          E2E_PG_PORT: "15432"

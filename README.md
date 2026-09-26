@@ -393,7 +393,12 @@ uv run pytest
 Adjust the URL when credentials differ from `.env.example`. Tests clear Bag tables
 and require the database name to end in `_test`. Never use the application database.
 Without the variable integration tests skip. CI always runs the full PostgreSQL 17
-suite, lint, strict type checking, Python packaging and the container build.
+suite, lint, strict type checking, Python packaging, the container builds, the web
+tests and build, and `scripts/e2e.sh`: a smoke test that starts a disposable
+Compose stack under its own project name and ports, signs in through the web
+proxy, captures text, a private URL and a file, waits for processing, searches,
+downloads, trashes, restores, exports and tears everything down. Run it locally
+with Docker available; it never touches the `bag` project's volumes.
 
 For host-based development, with PostgreSQL running and `.env` configured, run the
 API and, in a second terminal, the worker:
