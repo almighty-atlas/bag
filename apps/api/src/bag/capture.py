@@ -15,6 +15,7 @@ from bag.schemas import (
     CaptureResponse,
     FileCapture,
     ItemResponse,
+    ItemUpdate,
     ProcessingRunResponse,
     TextCapture,
     UrlCapture,
@@ -179,7 +180,7 @@ def _capture(
 def get_item(settings: Settings, owner_id: UUID, item_id: UUID) -> ItemResponse:
     with connection(settings) as conn:
         row = conn.execute(
-            "SELECT id, kind, source, content, user_note, mime_type, original_filename, "
+            "SELECT id, kind, source, title, content, user_note, mime_type, original_filename, "
             "content_hash, source_url, extracted_text, language, "
             "processing_status, created_at, captured_at, updated_at FROM item "
             "WHERE owner_id = %s AND id = %s AND deleted_at IS NULL",
@@ -188,6 +189,35 @@ def get_item(settings: Settings, owner_id: UUID, item_id: UUID) -> ItemResponse:
     if row is None:
         raise HTTPException(404, "Item not found")
     return ItemResponse.model_validate(row)
+
+
+def update_item(
+    settings: Settings, owner_id: UUID, item_id: UUID, payload: ItemUpdate
+) -> ItemResponse:
+    """Apply user edits; a chosen language is marked so detection never overrides it."""
+    changes = payload.model_dump(exclude_unset=True)
+    with connection(settings) as conn:
+        row = conn.execute(
+            "SELECT id FROM item WHERE owner_id = %s AND id = %s AND deleted_at IS NULL FOR UPDATE",
+            (owner_id, item_id),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "Item not found")
+        assignments = [f"{column} = %({column})s" for column in changes]
+        if "language" in changes:
+            assignments.append(
+                "metadata = jsonb_set(metadata, '{language,user}', 'true', true)"
+                if changes["language"] is not None
+                else "metadata = metadata #- '{language,user}'"
+            )
+        if assignments:
+            conn.execute(
+                f"UPDATE item SET {', '.join(assignments)}, updated_at = now() "
+                "WHERE owner_id = %(owner_id)s AND id = %(item_id)s",
+                {**changes, "owner_id": owner_id, "item_id": item_id},
+            )
+    logger.info("item_updated", extra={"item_id": item_id, "owner_id": owner_id})
+    return get_item(settings, owner_id, item_id)
 
 
 def trash_item(settings: Settings, owner_id: UUID, item_id: UUID) -> None:

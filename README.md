@@ -151,6 +151,20 @@ times) and `trashed=true`. Listings omit `content` and `extracted_text`; fetch t
 item by ID for those. Snippets are plain text that clients must escape before
 rendering as HTML.
 
+## Editing title, note and language
+
+Send only the fields to change; `null` clears a field. Setting `language` to `de`
+or `en` fixes the search stemmer and stops automatic detection from overriding
+it; setting it to `null` lets detection run again on the next reprocess:
+
+```sh
+curl --fail-with-body -sS -X PATCH "http://localhost:8000/api/v1/items/$ITEM_ID" \
+  -H "Authorization: Bearer $BAG_TOKEN" -H 'Content-Type: application/json' \
+  --data '{"title":"Umzugsnotizen","user_note":"Bücherkisten zuerst","language":"de"}'
+```
+
+Content, kind and extracted text cannot be edited; originals stay as captured.
+
 ## Trash and restore
 
 Deleting moves an item to the trash: it vanishes from listings, search, detail and

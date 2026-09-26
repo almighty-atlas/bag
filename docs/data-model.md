@@ -58,7 +58,8 @@ nullable `original_filename`, including NULL for existing text captures.
 keep original content, notes and timestamps, including for trashed items. They never
 restore or recreate an item. `captured_at` defaults to insertion time; supplied
 values require a timezone. `created_at` is server-set. Processing updates
-`updated_at` whenever it changes enrichment columns or the derived status.
+`updated_at` whenever it changes enrichment columns or the derived status; user
+edits of `title` (up to 500 characters), `user_note` and `language` do too.
 
 ## Processing rows
 

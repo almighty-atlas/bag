@@ -57,6 +57,21 @@ class UrlCapture(CaptureMetadata):
         return value
 
 
+class ItemUpdate(BaseModel):
+    """Fields a user may edit; absent fields stay unchanged, null clears."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, max_length=500)
+    user_note: str | None = None
+    language: Literal["de", "en"] | None = None
+
+    @field_validator("title", "user_note")
+    @classmethod
+    def postgres_text(cls, value: str | None) -> str | None:
+        return CaptureMetadata.postgres_text(value)
+
+
 class CaptureResponse(BaseModel):
     id: UUID
     status: Literal["stored"] = "stored"
@@ -69,6 +84,7 @@ class ItemResponse(BaseModel):
     kind: str
     source: str
     source_url: str | None
+    title: str | None
     content: str | None
     user_note: str | None
     mime_type: str | None

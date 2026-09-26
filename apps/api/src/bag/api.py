@@ -33,6 +33,7 @@ from bag.capture import (
     reprocess_item,
     restore_item,
     trash_item,
+    update_item,
 )
 from bag.config import Settings
 from bag.db import ready
@@ -43,6 +44,7 @@ from bag.schemas import (
     FileCapture,
     ItemPage,
     ItemResponse,
+    ItemUpdate,
     ProcessingRunResponse,
     SearchPage,
     TextCapture,
@@ -222,6 +224,12 @@ def create_app(
     @app.get("/api/v1/items/{item_id}", response_model=ItemResponse)
     def item(item_id: UUID, actor: Annotated[Identity, Depends(identity)]) -> ItemResponse:
         return get_item(settings, actor.owner_id, item_id)
+
+    @app.patch("/api/v1/items/{item_id}", response_model=ItemResponse)
+    def update(
+        item_id: UUID, payload: ItemUpdate, actor: Annotated[Identity, Depends(identity)]
+    ) -> ItemResponse:
+        return update_item(settings, actor.owner_id, item_id, payload)
 
     @app.delete("/api/v1/items/{item_id}", status_code=204)
     def trash(item_id: UUID, actor: Annotated[Identity, Depends(identity)]) -> Response:

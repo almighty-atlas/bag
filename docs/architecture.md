@@ -89,7 +89,11 @@ for all live items of an owner, by default only for processors without a run (it
 from before the queue existed or newly registered processors), optionally for failed
 runs or everything.
 
-`DELETE /api/v1/items/{id}` sets `deleted_at` and `POST /api/v1/items/{id}/restore`
+`PATCH /api/v1/items/{id}` edits `title`, `user_note` and `language` of a live item
+under a row lock; absent fields stay, null clears. Choosing a language sets
+`metadata.language.user`, which the detector honors, and clearing it removes the
+marker so the next run may detect again. Originals, kind and extraction stay
+read-only. `DELETE /api/v1/items/{id}` sets `deleted_at` and `POST /api/v1/items/{id}/restore`
 clears it; both are idempotent and owner-scoped. Trashed items disappear from
 detail, download, processing and default listings but remain listable and
 searchable with `trashed=true`. Nothing is removed until `bag purge` hard-deletes
