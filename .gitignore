@@ -11,3 +11,5 @@ dist/
 htmlcov/
 .DS_Store
 data/
+node_modules
+apps/web/dist

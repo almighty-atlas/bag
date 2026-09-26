@@ -2,11 +2,15 @@
 
 One Python package under `apps/api/src/bag` targets Python 3.12+. FastAPI serves the
 API; synchronous Psycopg connections execute parameterized SQL in short-lived
-transactions. There is no ORM, Redis, frontend or client. Alembic uses SQLAlchemy
-only to apply packaged SQL migrations.
+transactions. There is no ORM or Redis. Alembic uses SQLAlchemy only to apply
+packaged SQL migrations. `apps/web` is a Preact/Vite/TypeScript app (ADR-0017)
+that talks only to the API: login, feed with cursor paging, search with snippets,
+text/URL/file capture with the post-capture note, item detail with original
+download, editing of title, note and tags, processing state, reprocess and trash.
 
-Compose starts PostgreSQL 17, `bag-api` and `bag-worker`. API and worker share a
-non-root image built from locked uv dependencies. `bag worker` runs the job loop in
+Compose starts PostgreSQL 17, `bag-api`, `bag-worker` and `bag-web`. API and worker
+share a non-root image built from locked uv dependencies; `bag-web` is an nginx
+image serving the static build and proxying `/api/` to the API on the same origin. `bag worker` runs the job loop in
 a thread next to a health/readiness server; the worker is ready only when the schema
 revision matches and the loop thread is alive. Shutdown stops the loop and waits a
 bounded time for the current job; leases recover anything cut off.

@@ -55,6 +55,17 @@ services:
       interval: 10s
       timeout: 6s
       retries: 3
+  bag-web:
+    image: bag-web:local
+    build:
+      context: ../..
+      dockerfile: deploy/compose/Dockerfile.web
+    ports:
+      - "127.0.0.1:${BAG_WEB_PORT:-8080}:80"
+    depends_on:
+      bag-api:
+        condition: service_healthy
+    restart: unless-stopped
   bag-worker:
     <<: *app
     command: [bag, worker]

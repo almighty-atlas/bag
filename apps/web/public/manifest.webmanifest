@@ -1,0 +1,10 @@
+{
+  "name": "Bag of Holding",
+  "short_name": "Bag",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#111015",
+  "theme_color": "#5b3fa6",
+  "description": "Drop anything in. Organize later. Retrieve by meaning.",
+  "icons": []
+}

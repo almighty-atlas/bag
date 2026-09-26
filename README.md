@@ -2,12 +2,12 @@
 
 > A self-hosted, capture-first personal memory system. Drop anything in. Organize later. Retrieve by meaning.
 
-**Status:** text, URL and file capture implemented. Bearer authentication, durable original
-storage, authenticated file downloads, idempotent retries and duplicate relations work.
-The worker executes a PostgreSQL job queue with leases and bounded retries; processors
-verify MIME types, extract plain text and detect German/English. Items can be listed,
-filtered and searched with ranked snippets. Page fetching, deletion, export and
-clients remain pending.
+**Status:** Phase 2 complete. Text, URL and file capture, bearer and session
+authentication, durable originals, a leased PostgreSQL job queue, MIME verification,
+text extraction, language detection, SSRF-guarded page fetching, ranked multilingual
+search, tags, collections, trash, purge, garbage collection and export all work. A
+first Preact web UI (login, feed, search, capture, detail, trash) is available; the
+PWA polish, Linux client and mobile sharing follow.
 
 ## What it is
 
@@ -284,11 +284,27 @@ docker compose --env-file .env -f deploy/compose/compose.yaml restart postgres b
 docker compose --env-file .env -f deploy/compose/compose.yaml up -d --wait
 ```
 
+## Web UI
+
+The web app runs as the `bag-web` service on <http://localhost:8080> (`BAG_WEB_PORT`)
+and proxies the API on the same origin. It offers login, a feed, search, capture
+of text, links and files with an optional thought, item details with original
+download, editing of title, note and tags, processing state and the trash. Build
+and start it after setting a password:
+
+```sh
+docker compose --env-file .env -f deploy/compose/compose.yaml up -d --build bag-web
+```
+
+For frontend development run `npm ci && npm run dev` in `apps/web` (Node 22); the
+dev server proxies `/api` to <http://127.0.0.1:8000>. With plain http on
+localhost set `BAG_COOKIE_SECURE=false`, otherwise the browser drops the cookie.
+
 ## Web login
 
-The coming web UI signs in with a username and password instead of a bearer
-token. Set them once on the server (the prompt hides input; `--stdin` reads one
-line for automation with a secret manager). Passwords need at least 10 characters:
+The web UI signs in with a username and password instead of a bearer token. Set
+them once on the server (the prompt hides input; `--stdin` reads one line for
+automation with a secret manager). Passwords need at least 10 characters:
 
 ```sh
 docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api \
