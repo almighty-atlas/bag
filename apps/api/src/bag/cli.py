@@ -22,7 +22,7 @@ from bag.export import ExportError, export_bag
 from bag.ids import uuid7
 from bag.importer import import_bag
 from bag.jobs import Scope, reprocess
-from bag.maintenance import collect_garbage, purge_items
+from bag.maintenance import MaintenanceLoop, collect_garbage, purge_items
 from bag.sessions import set_password
 from bag.storage import FileSystemStorage, StorageError
 from bag.tokens import TokenAdminError, create_token, list_tokens, resolve_owner, revoke_token
@@ -220,13 +220,22 @@ def main() -> None:
 
 def run_worker(settings: Settings) -> None:
     stop = threading.Event()
-    worker = Worker(settings, FileSystemStorage(settings.storage_path))
-    thread = threading.Thread(target=worker.run_forever, args=(stop,), daemon=True)
-    thread.start()
+    storage = FileSystemStorage(settings.storage_path)
+    worker = Worker(settings, storage)
+    threads = [threading.Thread(target=worker.run_forever, args=(stop,), daemon=True)]
+    if settings.maintenance_interval_hours > 0:
+        loop = MaintenanceLoop(settings, storage)
+        threads.append(threading.Thread(target=loop.run_forever, args=(stop,), daemon=True))
+    for thread in threads:
+        thread.start()
     try:
-        # Readiness reports the job loop; the health server handles shutdown signals.
+        # Readiness reports the loops; the health server handles shutdown signals.
         uvicorn.run(
-            create_app(settings, worker=True, worker_alive=thread.is_alive),
+            create_app(
+                settings,
+                worker=True,
+                worker_alive=lambda: all(thread.is_alive() for thread in threads),
+            ),
             host="0.0.0.0",
             port=settings.worker_port,
             access_log=False,
@@ -234,4 +243,5 @@ def run_worker(settings: Settings) -> None:
     finally:
         stop.set()
         # Let a running job record its result; the lease recovers anything cut off here.
-        thread.join(timeout=SHUTDOWN_GRACE_SECONDS)
+        for thread in threads:
+            thread.join(timeout=SHUTDOWN_GRACE_SECONDS)

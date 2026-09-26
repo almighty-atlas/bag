@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 from datetime import timedelta
 from uuid import UUID
@@ -134,3 +135,32 @@ def collect_garbage(
                 result["freed_bytes"] += obj.size_bytes
     logger.info("storage_collected")
     return result
+
+
+class MaintenanceLoop:
+    """Runs purge and garbage collection inside the worker on a fixed interval."""
+
+    def __init__(self, settings: Settings, storage: FileSystemStorage) -> None:
+        self.settings = settings
+        self.storage = storage
+
+    def run_once(self) -> dict[str, int]:
+        purged = purge_items(self.settings)
+        collected = collect_garbage(self.settings, self.storage)
+        result = {**purged, **collected}
+        logger.info(
+            "maintenance_completed",
+            extra={"purged": result["purged"], "removed": result["removed"]},
+        )
+        return result
+
+    def run_forever(self, stop: threading.Event) -> None:
+        interval = self.settings.maintenance_interval_hours * 3600
+        if interval <= 0:
+            return
+        # The first run waits a full interval: a fresh start should serve captures first.
+        while not stop.wait(interval):
+            try:
+                self.run_once()
+            except Exception:  # noqa: BLE001 - maintenance must never take the worker down
+                logger.error("maintenance_failed")

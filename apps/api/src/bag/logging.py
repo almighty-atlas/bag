@@ -6,7 +6,16 @@ class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         # Deliberate allowlist: never serialize request bodies, tokens or exception text.
         fields = {"level": record.levelname, "event": record.getMessage()}
-        for key in ("item_id", "owner_id", "client_capture_id", "job_id", "processor", "attempt"):
+        for key in (
+            "item_id",
+            "owner_id",
+            "client_capture_id",
+            "job_id",
+            "processor",
+            "attempt",
+            "purged",
+            "removed",
+        ):
             value = getattr(record, key, None)
             if value is not None:
                 fields[key] = str(value)

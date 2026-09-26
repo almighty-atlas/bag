@@ -29,6 +29,50 @@ def age(path: Path, hours: float) -> None:
     os.utime(path, (stamp, stamp))
 
 
+def test_maintenance_loop_runs_on_interval_and_survives_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bag import maintenance
+    from bag.config import Settings
+    from pydantic import SecretStr
+
+    calls: list[str] = []
+
+    def purge(settings: Settings, **kwargs: object) -> dict[str, int]:
+        calls.append("purge")
+        if len(calls) == 1:
+            raise RuntimeError("database gone")
+        return {"expired": 0, "purged": 2, "jobs_pruned": 0}
+
+    def collect(settings: Settings, storage: object, **kwargs: object) -> dict[str, int]:
+        calls.append("gc")
+        return {"scanned": 0, "removed": 1, "freed_bytes": 0, "kept": 0}
+
+    monkeypatch.setattr(maintenance, "purge_items", purge)
+    monkeypatch.setattr(maintenance, "collect_garbage", collect)
+    settings = Settings(
+        database_url=SecretStr("postgresql://x:y@127.0.0.1:1/z"),
+        maintenance_interval_hours=0.05 / 3600,  # 50 ms
+    )
+    loop = maintenance.MaintenanceLoop(settings, FileSystemStorage(tmp_path))
+    stop = threading.Event()
+    thread = threading.Thread(target=loop.run_forever, args=(stop,))
+    thread.start()
+    deadline = time.time() + 5
+    while calls.count("gc") < 2 and time.time() < deadline:
+        time.sleep(0.02)
+    stop.set()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    # The first purge failed and was logged; later rounds ran both steps.
+    assert calls[0] == "purge" and calls.count("gc") >= 2
+    assert loop.run_once()["purged"] == 2
+    disabled = maintenance.MaintenanceLoop(
+        settings.model_copy(update={"maintenance_interval_hours": 0}), FileSystemStorage(tmp_path)
+    )
+    disabled.run_forever(threading.Event())  # returns immediately
+
+
 def test_scan_and_remove_are_confined_to_storage_layout(tmp_path: Path) -> None:
     storage = FileSystemStorage(tmp_path)
     assert list(storage.scan()) == []

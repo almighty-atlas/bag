@@ -139,8 +139,9 @@ than `BAG_JOB_RETENTION_DAYS` (runs, the visible state, stay). `bag gc` then rem
 objects no blob row references and crash-left `.upload-*` files: candidates are
 scanned without locks, and each deletion batch holds every owner's capture lock
 while re-checking references, so it waits for in-flight captures and can never
-remove an object a capture is publishing. Both are explicit commands, not
-scheduled background jobs.
+remove an object a capture is publishing. Both run as explicit commands and, per
+ADR-0019, on a schedule inside the worker (`BAG_MAINTENANCE_INTERVAL_HOURS`,
+default daily, `0` disables) in a second thread that readiness also watches.
 
 `bag export <dir>` snapshots one owner's tables in a repeatable-read transaction
 into JSONL files plus a manifest, then copies every referenced original through the

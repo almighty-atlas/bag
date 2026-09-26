@@ -27,3 +27,5 @@ class Settings(BaseSettings):
     login_max_failures: int = Field(default=10, ge=1, le=1000)
     login_window_seconds: float = Field(default=900.0, ge=1, le=86_400)
     job_retention_days: int = Field(default=7, ge=0, le=3650)
+    # Hours between automatic purge/gc runs in the worker; 0 leaves it to cron.
+    maintenance_interval_hours: float = Field(default=24.0, ge=0, le=8760)

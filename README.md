@@ -198,11 +198,12 @@ curl --fail-with-body -sS -X POST "http://localhost:8000/api/v1/items/$ITEM_ID/r
   -H "Authorization: Bearer $BAG_TOKEN"
 ```
 
-Permanent removal is a separate, explicit server command. `bag purge` deletes items
-that have been in the trash longer than `BAG_TRASH_RETENTION_DAYS` (default 30);
-`bag gc` afterwards removes stored files no item references any more, plus
-temporary files left by crashes. Preview both with `--dry-run`. Neither runs
-automatically; schedule them with cron or run them after a cleanup:
+Permanent removal happens in two steps. `bag purge` deletes items that have been
+in the trash longer than `BAG_TRASH_RETENTION_DAYS` (default 30); `bag gc`
+afterwards removes stored files no item references any more, plus temporary files
+left by crashes. The worker runs both automatically every
+`BAG_MAINTENANCE_INTERVAL_HOURS` (default 24; set `0` to leave it to cron). Preview
+or trigger them by hand with the commands below (`--dry-run` shows what would go):
 
 ```sh
 docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api bag purge --dry-run
