@@ -1,6 +1,8 @@
 import argparse
+import getpass
 import json
 import secrets
+import sys
 import threading
 from dataclasses import asdict
 from datetime import timedelta
@@ -20,6 +22,7 @@ from bag.export import ExportError, export_bag
 from bag.ids import uuid7
 from bag.jobs import Scope, reprocess
 from bag.maintenance import collect_garbage, purge_items
+from bag.sessions import set_password
 from bag.storage import FileSystemStorage, StorageError
 from bag.tokens import TokenAdminError, create_token, list_tokens, resolve_owner, revoke_token
 from bag.worker import Worker
@@ -104,11 +107,33 @@ def main() -> None:
     gc_parser = commands.add_parser("gc", help="Remove unreferenced storage objects")
     gc_parser.add_argument("--min-age-hours", type=float, default=1.0)
     gc_parser.add_argument("--dry-run", action="store_true")
+    password_parser = commands.add_parser("password", help="Web login administration")
+    password_actions = password_parser.add_subparsers(dest="action", required=True)
+    set_parser = password_actions.add_parser("set", help="Set username and password")
+    set_parser.add_argument("--username", required=True)
+    set_parser.add_argument("--owner", type=UUID, help="Required if multiple owners exist")
+    set_parser.add_argument(
+        "--stdin", action="store_true", help="Read the password from standard input"
+    )
     export_parser = commands.add_parser("export", help="Write originals and JSONL metadata")
     export_parser.add_argument("directory", type=Path, help="Empty or missing target directory")
     export_parser.add_argument("--owner", type=UUID, help="Required if multiple owners exist")
     args = parser.parse_args()
-    if args.command == "export":
+    if args.command == "password":
+        try:
+            if args.stdin:
+                password = sys.stdin.readline().rstrip("\r\n")
+            else:
+                password = getpass.getpass("New password: ")
+                if password != getpass.getpass("Repeat password: "):
+                    parser.exit(1, "Passwords do not match.\n")
+            set_password(Settings(), args.username, password, args.owner)
+            print("Password set; existing web sessions were signed out.")
+        except TokenAdminError as exc:
+            parser.exit(1, f"{exc}\n")
+        except psycopg.Error:
+            parser.exit(1, "Database operation failed; the password was not changed.\n")
+    elif args.command == "export":
         try:
             settings = Settings()
             result = export_bag(

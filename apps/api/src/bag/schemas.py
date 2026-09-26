@@ -109,6 +109,44 @@ class ItemUpdate(BaseModel):
         return sorted({valid_name(name) for name in value})
 
 
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class SessionResponse(BaseModel):
+    owner_id: UUID
+    username: str | None
+    display_name: str
+    via: Literal["token", "session"]
+    expires_at: datetime | None
+
+
+class TokenCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def checked(cls, value: str) -> str:
+        return valid_name(value)
+
+
+class TokenResponse(BaseModel):
+    id: UUID
+    name: str
+    created_at: datetime
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+
+
+class TokenCreated(TokenResponse):
+    token: str
+
+
 class CaptureResponse(BaseModel):
     id: UUID
     status: Literal["stored"] = "stored"

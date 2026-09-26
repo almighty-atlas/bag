@@ -1,5 +1,6 @@
 import hashlib
 from dataclasses import dataclass
+from typing import Literal
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -15,6 +16,7 @@ def token_hash(token: str) -> str:
 @dataclass(frozen=True)
 class Identity:
     owner_id: UUID
+    via: Literal["token", "session"] = "token"
 
 
 def authenticate(settings: Settings, authorization: str | None) -> Identity:

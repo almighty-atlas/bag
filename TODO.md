@@ -21,6 +21,16 @@ collections with filters, and `bag export`.
 - [ ] Decide whether the worker should run `purge`/`gc` on a schedule or leave it to cron.
 - [ ] Add `bag import <dir>` reading export format version 1, idempotent by item ID.
 
+## Phase 3 — Web / PWA
+
+- [ ] Choose Preact or Svelte in an ADR and scaffold `apps/web` (Vite, TypeScript strict,
+      Node 22) with a `bag-web` Compose service that serves the static build and proxies `/api`.
+- [ ] Login screen, feed with cursor pagination, search with filters, item detail with
+      original download and processing state, capture (paste/upload), notes, tags,
+      collections, trash with restore, token management.
+- [ ] PWA manifest and service worker for offline shell; share target for URLs/text/files.
+- [ ] Rate-limit login attempts per username and address.
+
 ## Later phases
 
 See the roadmap in `docs/spec.md` section 18. Break the next phase into items here when the current one is done.

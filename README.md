@@ -284,6 +284,26 @@ docker compose --env-file .env -f deploy/compose/compose.yaml restart postgres b
 docker compose --env-file .env -f deploy/compose/compose.yaml up -d --wait
 ```
 
+## Web login
+
+The coming web UI signs in with a username and password instead of a bearer
+token. Set them once on the server (the prompt hides input; `--stdin` reads one
+line for automation with a secret manager). Passwords need at least 10 characters:
+
+```sh
+docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api \
+  bag password set --username atlas
+```
+
+`POST /api/v1/session` with `{"username": ..., "password": ...}` and the header
+`X-Bag-Csrf: 1` sets an `HttpOnly` session cookie; every later state-changing
+request from the browser must send that header as well. `GET /api/v1/session`
+shows who is signed in, `DELETE` signs out. Tokens for clients are managed at
+`/api/v1/tokens` and only with a session, never with another token. Behind a
+plain-http development setup set `BAG_COOKIE_SECURE=false`; in production keep the
+default and terminate TLS at the reverse proxy. Setting a new password signs out
+all sessions.
+
 ## Token administration and recovery
 
 Run these commands on the server, using access to the Compose deployment. They do

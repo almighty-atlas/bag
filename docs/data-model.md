@@ -1,14 +1,16 @@
 # Data model as built
 
-Migration `0001_foundation` creates the tables below; `0002_jobs` adds `job` and
-`0003_active_job` its unique active-job index. All
+Migration `0001_foundation` creates the tables below; `0002_jobs` adds `job`,
+`0003_active_job` its unique active-job index and `0004_sessions` the web login
+columns and `session` table. All
 have server-generated UUIDv7 primary keys. Timestamps use `timestamptz`; API
 connections use UTC. `user` is the ownership root; every other table has `owner_id`.
 
 | Table | Purpose and constraints |
 | --- | --- |
-| `user` | Ownership root: ID, display name, creation time |
+| `user` | Ownership root: ID, display name, creation time, unique nullable `username`, argon2id `password_hash` |
 | `api_token` | Owner, name, unique SHA-256 token hash, creation/use/revocation times |
+| `session` | Owner, unique SHA-256 hash of the cookie token, creation, last-seen, expiry and revocation times |
 | `item` | Original content, source, kind, note, capture key, hash, status, timestamps, deletion marker and extraction fields |
 | `blob` | Item, role (`original` or `snapshot`), SHA-256, size, MIME and hash-derived path |
 | `processing_run` | Unique owner/item/processor, status, attempts, error and run times |

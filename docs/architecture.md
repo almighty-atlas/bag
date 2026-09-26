@@ -30,6 +30,16 @@ and global bootstrap are ownership-discovery/admin exceptions; subsequent querie
 use `owner_id`. Composite foreign keys prevent cross-owner associations. Revoked
 tokens are rejected on subsequent authentication requests.
 
+Web login (ADR-0016): `bag password set --username` stores an argon2id hash and
+signs out existing sessions. `POST /api/v1/session` opens a server-side session
+(random token, SHA-256 stored, expiry from `BAG_SESSION_DAYS`) and sets the
+`bag_session` cookie (`HttpOnly`, `Secure` unless `BAG_COOKIE_SECURE=false`,
+`SameSite=Lax`, path `/api`). Every route accepts a bearer token first, then the
+cookie; cookie-authenticated unsafe requests and login must carry `X-Bag-Csrf: 1`.
+`GET /api/v1/session` reports the identity and `DELETE` signs out. Token
+management (`/api/v1/tokens`) requires a session, so bearer tokens cannot create
+or revoke tokens.
+
 Capture locks the owner row to serialize idempotency and duplicate checks. A unique
 owner/key constraint adds database enforcement. This trades per-owner throughput
 for simple race semantics in the single-user MVP. Text is inserted unchanged and

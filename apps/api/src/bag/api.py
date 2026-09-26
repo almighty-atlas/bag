@@ -1,5 +1,7 @@
 import logging
 from collections.abc import Callable
+from dataclasses import asdict
+from datetime import datetime
 from tempfile import SpooledTemporaryFile
 from typing import Annotated, Any
 from uuid import UUID
@@ -23,7 +25,7 @@ from pydantic import AwareDatetime, ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from bag.auth import Identity, authenticate
+from bag.auth import Identity, authenticate, unauthorized
 from bag.capture import (
     capture_file,
     capture_text,
@@ -36,7 +38,7 @@ from bag.capture import (
     update_item,
 )
 from bag.config import Settings
-from bag.db import ready
+from bag.db import connection, ready
 from bag.download import download
 from bag.logging import configure_logging
 from bag.organize import Kind, create_named, list_named
@@ -46,15 +48,22 @@ from bag.schemas import (
     ItemPage,
     ItemResponse,
     ItemUpdate,
+    LoginRequest,
     NameCreate,
     NamedResponse,
     ProcessingRunResponse,
     SearchPage,
+    SessionResponse,
     TextCapture,
+    TokenCreate,
+    TokenCreated,
+    TokenResponse,
     UrlCapture,
 )
 from bag.search import list_items, search_items
+from bag.sessions import COOKIE_NAME, LoginError, authenticate_session, login, logout
 from bag.storage import CHUNK_SIZE, FileSystemStorage, StorageError, UploadTooLarge
+from bag.tokens import TokenAdminError, create_token, list_tokens, revoke_token
 
 
 class RequestSizeLimit:
@@ -102,6 +111,26 @@ class RequestSizeLimit:
                 return {"type": "http.request", "body": data, "more_body": more}
 
             await self.app(scope, bounded_receive, send)
+
+
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+CSRF_HEADER = "x-bag-csrf"
+
+
+def whoami(settings: Settings, actor: Identity | None, expires: datetime | None) -> SessionResponse:
+    assert actor is not None
+    with connection(settings) as conn:
+        row = conn.execute(
+            'SELECT username, display_name FROM "user" WHERE id = %s', (actor.owner_id,)
+        ).fetchone()
+    assert row is not None
+    return SessionResponse(
+        owner_id=actor.owner_id,
+        username=row["username"],
+        display_name=row["display_name"],
+        via=actor.via,
+        expires_at=expires,
+    )
 
 
 def create_app(
@@ -155,11 +184,83 @@ def create_app(
 
     bearer = HTTPBearer(auto_error=False)
 
+    def csrf_guard(request: Request) -> None:
+        # Cookies are sent cross-site by forms; a custom header cannot be, so require one.
+        if request.method not in SAFE_METHODS and request.headers.get(CSRF_HEADER) != "1":
+            raise HTTPException(403, f"Missing {CSRF_HEADER} header")
+
     def identity(
+        request: Request,
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     ) -> Identity:
-        value = f"{credentials.scheme} {credentials.credentials}" if credentials else None
-        return authenticate(settings, value)
+        if credentials is not None:
+            return authenticate(settings, f"{credentials.scheme} {credentials.credentials}")
+        cookie = request.cookies.get(COOKIE_NAME)
+        if cookie:
+            actor = authenticate_session(settings, cookie)
+            if actor is not None:
+                csrf_guard(request)
+                return actor
+        raise unauthorized()
+
+    def session_only(actor: Annotated[Identity, Depends(identity)]) -> Identity:
+        if actor.via != "session":
+            raise HTTPException(403, "Sign in with a password to manage tokens")
+        return actor
+
+    @app.post("/api/v1/session", response_model=SessionResponse)
+    def create_session(
+        payload: LoginRequest, request: Request, response: Response
+    ) -> SessionResponse:
+        csrf_guard(request)
+        try:
+            token, expires = login(settings, payload.username, payload.password)
+        except LoginError as exc:
+            raise HTTPException(401, "Invalid username or password") from exc
+        response.set_cookie(
+            COOKIE_NAME,
+            token,
+            max_age=settings.session_days * 86_400,
+            path="/api",
+            secure=settings.cookie_secure,
+            httponly=True,
+            samesite="lax",
+        )
+        return whoami(settings, authenticate_session(settings, token), expires)
+
+    @app.get("/api/v1/session", response_model=SessionResponse)
+    def read_session(actor: Annotated[Identity, Depends(identity)]) -> SessionResponse:
+        return whoami(settings, actor, None)
+
+    @app.delete("/api/v1/session", status_code=204)
+    def delete_session(
+        request: Request, actor: Annotated[Identity, Depends(session_only)]
+    ) -> Response:
+        logout(settings, request.cookies.get(COOKIE_NAME, ""))
+        response = Response(status_code=204)
+        response.delete_cookie(COOKIE_NAME, path="/api")
+        return response
+
+    @app.get("/api/v1/tokens", response_model=list[TokenResponse])
+    def tokens(actor: Annotated[Identity, Depends(session_only)]) -> list[TokenResponse]:
+        return [TokenResponse(**asdict(row)) for row in list_tokens(settings, actor.owner_id)]
+
+    @app.post("/api/v1/tokens", response_model=TokenCreated, status_code=201)
+    def create_api_token(
+        payload: TokenCreate, actor: Annotated[Identity, Depends(session_only)]
+    ) -> TokenCreated:
+        info, secret = create_token(settings, payload.name, actor.owner_id)
+        return TokenCreated(**asdict(info), token=secret.get_secret_value())
+
+    @app.delete("/api/v1/tokens/{token_id}", status_code=204)
+    def revoke_api_token(
+        token_id: UUID, actor: Annotated[Identity, Depends(session_only)]
+    ) -> Response:
+        try:
+            revoke_token(settings, token_id, actor.owner_id)
+        except TokenAdminError as exc:
+            raise HTTPException(404, "Token not found") from exc
+        return Response(status_code=204)
 
     @app.post("/api/v1/capture/text", response_model=CaptureResponse, status_code=201)
     def post_text(

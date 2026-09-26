@@ -22,3 +22,5 @@ class Settings(BaseSettings):
     fetch_max_bytes: int = Field(default=5_242_880, ge=1024)
     fetch_timeout_seconds: float = Field(default=10.0, ge=0.1, le=300)
     fetch_max_redirects: int = Field(default=5, ge=0, le=20)
+    cookie_secure: bool = True
+    session_days: int = Field(default=30, ge=1, le=365)
