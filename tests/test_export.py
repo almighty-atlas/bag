@@ -2,12 +2,15 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from bag.cli import main
 from bag.config import Settings
 from bag.db import connection
 from bag.export import ExportError, export_bag
+from bag.ids import uuid7
+from bag.importer import import_bag
 from bag.processors import PROCESSORS
 from bag.storage import FileSystemStorage
 from bag.worker import Worker
@@ -102,6 +105,136 @@ def test_export_writes_originals_and_metadata(
         main()
     assert error.value.code == 1
     assert not (tmp_path / "third" / "manifest.json").exists()
+
+
+def test_import_round_trip_is_idempotent_and_verifies_objects(
+    settings: Settings,
+    client: TestClient,
+    headers: dict[str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    storage = FileSystemStorage(settings.storage_path)
+    pdf = client.post(
+        "/api/v1/capture/file", headers=headers, files={"file": ("Bücher.pdf", PDF)}
+    ).json()
+    text = client.post(
+        "/api/v1/capture/text",
+        json={"content": "Grüße 💼", "user_note": "Notiz", "client_capture_id": str(uuid4())},
+        headers=headers,
+    ).json()
+    drain(Worker(settings, storage))
+    client.patch(
+        f"/api/v1/items/{pdf['id']}",
+        json={"tags": ["lesen"], "collections": ["Umzug"], "title": "Bücherliste"},
+        headers=headers,
+    )
+    client.delete(f"/api/v1/items/{text['id']}", headers=headers)
+    before = {
+        table: rows(settings, table)
+        for table in (
+            "item",
+            "blob",
+            "tag",
+            "item_tag",
+            "collection",
+            "item_collection",
+            "relation",
+            "processing_run",
+        )
+    }
+    target = tmp_path / "export"
+    export_bag(settings, storage, target)
+
+    # Wipe everything but the user, then import into the same owner.
+    with connection(settings) as conn:
+        for table in (
+            "job",
+            "processing_run",
+            "relation",
+            "item_tag",
+            "item_collection",
+            "blob",
+            "item",
+            "tag",
+            "collection",
+        ):
+            conn.execute(f"DELETE FROM {table}")
+    for path in list(settings.storage_path.rglob("*")):
+        if path.is_file():
+            path.unlink()
+    counts = import_bag(settings, storage, target)
+    assert counts == {
+        "items": 2,
+        "blobs": 1,
+        "tags": 1,
+        "collections": 1,
+        "relations": 0,
+        "processing_runs": 2 * len(PROCESSORS),
+        "objects": 1,
+    }
+    for table, expected in before.items():
+        assert rows(settings, table) == expected, table
+    restored = client.get(f"/api/v1/items/{pdf['id']}", headers=headers).json()
+    assert restored["title"] == "Bücherliste" and restored["tags"] == ["lesen"]
+    assert restored["collections"] == ["Umzug"] and restored["processing_status"] == "ready"
+    assert client.get(f"/api/v1/items/{pdf['id']}/content", headers=headers).content == PDF
+    assert (
+        client.get(f"/api/v1/items/{text['id']}", headers=headers).status_code == 404
+    )  # still trashed
+    assert [
+        row["id"]
+        for row in client.get("/api/v1/items?trashed=true", headers=headers).json()["items"]
+    ] == [text["id"]]
+    assert client.get("/api/v1/search?q=Bücherliste", headers=headers).json()["results"]
+    # Importing again changes nothing; a replay of the original capture key still resolves.
+    assert import_bag(settings, storage, target) == dict.fromkeys(counts, 0) | {"objects": 1}
+    for table, expected in before.items():
+        assert rows(settings, table) == expected, table
+
+    monkeypatch.setenv("BAG_STORAGE_PATH", str(settings.storage_path))
+    monkeypatch.setattr("sys.argv", ["bag", "import", str(target)])
+    main()
+    assert json.loads(capsys.readouterr().out)["items"] == 0
+    # A corrupt object aborts before any row is written; a foreign ID is refused.
+    (target / "objects" / hashlib.sha256(PDF).hexdigest()).write_bytes(b"tampered")
+    with connection(settings) as conn:
+        conn.execute("DELETE FROM job; DELETE FROM processing_run; DELETE FROM relation")
+        conn.execute(
+            "DELETE FROM item_tag; DELETE FROM item_collection; DELETE FROM blob; DELETE FROM item"
+        )
+    with pytest.raises(ExportError, match="corrupt"):
+        import_bag(settings, storage, target)
+    assert rows(settings, "item") == []
+    (target / "objects" / hashlib.sha256(PDF).hexdigest()).write_bytes(PDF)
+    other = uuid7()
+    with connection(settings) as conn:
+        conn.execute('INSERT INTO "user" (id, display_name) VALUES (%s, %s)', (other, "other"))
+        conn.execute(
+            "INSERT INTO item (id, owner_id, kind, source, processing_status) "
+            "VALUES (%s, %s, 'text', 'api', 'ready')",
+            (pdf["id"], other),
+        )
+    owner = before["item"][0]["owner_id"]
+    with pytest.raises(ExportError, match="another owner"):
+        import_bag(settings, storage, target, owner)
+    (target / "manifest.json").write_text('{"format": "bag-export", "version": 99}')
+    with pytest.raises(ExportError, match="version"):
+        import_bag(settings, storage, target, owner)
+
+
+def rows(settings: Settings, table: str) -> list[dict[str, Any]]:
+    # Assignments are relationships: the export carries them without their own IDs/timestamps.
+    volatile = {"search_vector"} | (
+        {"id", "created_at"} if table in {"item_tag", "item_collection"} else set()
+    )
+    with connection(settings) as conn:
+        found = conn.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()
+    return sorted(
+        ({k: v for k, v in row.items() if k not in volatile} for row in found),
+        key=lambda row: str(sorted(row.items())),
+    )
 
 
 def test_export_scoping(

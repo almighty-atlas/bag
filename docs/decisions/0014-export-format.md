@@ -24,7 +24,7 @@ IDs and timestamps are strings (UUID, ISO 8601 with offset). One owner per expor
 ## Consequences
 
 The export is a complete, offline-readable copy for one owner and the input
-contract for a future `bag import`. Objects are deduplicated by hash, so sizes
+contract for `bag import`, which restores by ID and skips rows that exist. Objects are deduplicated by hash, so sizes
 match storage, not the sum of items. A corrupt or missing original fails the
 export instead of silently omitting it. Text originals live only in
 `items.jsonl`; readers must treat every string as untrusted content.

@@ -15,7 +15,7 @@ from bag.tokens import resolve_owner
 
 FORMAT_VERSION = 1
 ITEM_COLUMNS = (
-    "id, kind, source, source_application, source_url, mime_type, language, "
+    "id, client_capture_id, kind, source, source_application, source_url, mime_type, language, "
     "original_filename, title, user_note, content, extracted_text, content_hash, "
     "processing_status, metadata, created_at, captured_at, updated_at, deleted_at"
 )

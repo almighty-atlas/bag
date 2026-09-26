@@ -20,6 +20,7 @@ from bag.config import Settings
 from bag.db import connection
 from bag.export import ExportError, export_bag
 from bag.ids import uuid7
+from bag.importer import import_bag
 from bag.jobs import Scope, reprocess
 from bag.maintenance import collect_garbage, purge_items
 from bag.sessions import set_password
@@ -118,6 +119,9 @@ def main() -> None:
     export_parser = commands.add_parser("export", help="Write originals and JSONL metadata")
     export_parser.add_argument("directory", type=Path, help="Empty or missing target directory")
     export_parser.add_argument("--owner", type=UUID, help="Required if multiple owners exist")
+    import_parser = commands.add_parser("import", help="Read an export directory back in")
+    import_parser.add_argument("directory", type=Path, help="Directory written by bag export")
+    import_parser.add_argument("--owner", type=UUID, help="Required if multiple owners exist")
     args = parser.parse_args()
     if args.command == "password":
         try:
@@ -133,19 +137,20 @@ def main() -> None:
             parser.exit(1, f"{exc}\n")
         except psycopg.Error:
             parser.exit(1, "Database operation failed; the password was not changed.\n")
-    elif args.command == "export":
+    elif args.command in ("export", "import"):
         try:
             settings = Settings()
-            result = export_bag(
+            transfer = export_bag if args.command == "export" else import_bag
+            result = transfer(
                 settings, FileSystemStorage(settings.storage_path), args.directory, args.owner
             )
             print(json.dumps(result))
         except (ExportError, TokenAdminError) as exc:
             parser.exit(1, f"{exc}\n")
         except StorageError:
-            parser.exit(1, "An original failed verification; export aborted.\n")
+            parser.exit(1, f"An object failed verification; {args.command} aborted.\n")
         except psycopg.Error:
-            parser.exit(1, "Database operation failed; export aborted.\n")
+            parser.exit(1, f"Database operation failed; {args.command} aborted.\n")
     elif args.command in ("purge", "gc"):
         try:
             settings = Settings()

@@ -15,7 +15,6 @@ collections with filters, and `bag export`.
 
 - [ ] Add a `pdf_text` processor with `pypdf` as decided in ADR-0018.
 - [ ] Decide whether the worker should run `purge`/`gc` on a schedule or leave it to cron.
-- [ ] Add `bag import <dir>` reading export format version 1, idempotent by item ID.
 
 ## Phase 3 — Web / PWA
 

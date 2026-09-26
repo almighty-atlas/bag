@@ -146,7 +146,11 @@ scheduled background jobs.
 into JSONL files plus a manifest, then copies every referenced original through the
 verified reader into `objects/<sha256>` with fsync. Trashed items are included;
 the generated search vector is not. The target must be empty, and any failed
-verification aborts the run before the manifest is written.
+verification aborts the run before the manifest is written. `bag import <dir>`
+reverses it for one owner: it checks the manifest version, hashes every object
+before touching the database, publishes objects through the content-addressed
+store and inserts rows with `ON CONFLICT DO NOTHING` in a single transaction, so
+reruns are no-ops and IDs owned by someone else are refused.
 
 ## Listing and search
 

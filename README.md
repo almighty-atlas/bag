@@ -420,9 +420,19 @@ mkdir -p ./export && docker compose --env-file .env -f deploy/compose/compose.ya
 ```
 
 The format is versioned (`version: 1`) and documented in
-`docs/decisions/0014-export-format.md`; a later `bag import` will read it. The
-export is not a substitute for the database dump plus storage archive described
-below, but it is the portable copy you can read without Bag of Holding.
+`docs/decisions/0014-export-format.md`. `bag import <dir>` reads it back into the
+current user: every object is verified against its hash before anything is
+written, rows are inserted only where their ID is missing (so repeating an import
+changes nothing), and an ID that belongs to another user aborts the import.
+Trashed items stay trashed. Run `bag reprocess` afterwards if the export came from
+an older version with fewer processors. The export is not a substitute for the
+database dump plus storage archive described below, but it is the portable copy
+you can read without Bag of Holding:
+
+```sh
+docker compose --env-file .env -f deploy/compose/compose.yaml run --rm \
+  -v "$PWD/export:/export" bag-api bag import /export/2026-09-26
+```
 
 ## Deployment and backup
 
