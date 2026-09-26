@@ -2,9 +2,9 @@
 
 > A self-hosted, capture-first personal memory system. Drop anything in. Organize later. Retrieve by meaning.
 
-**Status:** text and file capture implemented. Bearer authentication, durable original
+**Status:** text, URL and file capture implemented. Bearer authentication, durable original
 storage, authenticated file downloads, idempotent retries and duplicate relations work.
-URL capture, processing, search and clients remain pending. The worker exposes health/readiness;
+Page fetching, processing, search and clients remain pending. The worker exposes health/readiness;
 it does not execute jobs yet.
 
 ## What it is
@@ -69,6 +69,32 @@ API docs: <http://localhost:8000/docs>; OpenAPI: <http://localhost:8000/openapi.
 `/health` checks liveness; `/ready` checks PostgreSQL and the expected schema revision.
 Both API and worker expose these endpoints.
 
+## Try URL capture
+
+Update existing installations:
+
+```sh
+docker compose --env-file .env -f deploy/compose/compose.yaml up -d --build
+```
+
+No new migration or token is needed. In <http://localhost:8000/docs>, authorize and
+try `POST /api/v1/capture/url`:
+
+```json
+{
+  "url": "https://example.org/article?topic=memory#notes",
+  "user_note": "Read this later"
+}
+```
+
+Use the returned ID with `GET /api/v1/items/{item_id}`. Both `content` and
+`source_url` contain the exact URL as entered. Optional source, capture timestamp
+and retry keys work as for text/file capture. Only absolute HTTP(S) URLs up to
+8192 characters are accepted; whitespace, controls and backslashes are rejected.
+URLs are not normalized or fetched, including private addresses. No title, page
+snapshot or page MIME is available yet. Future fetching must apply independent
+SSRF checks; accepting a URL is not permission to fetch it.
+
 ## Try file capture
 
 Existing installations can update without replacing `.env` or the token:
@@ -109,7 +135,7 @@ back to `application/octet-stream`. The client MIME and filename extension are i
 Downloads always use an attachment with `nosniff`, even for recognized images or HTML.
 
 Files with equal bytes share physical storage, while separate captures keep their
-own notes and filenames. Keys are shared across text/file routes: a reused key
+own notes and filenames. Keys are shared across text/URL/file routes: a reused key
 returns the original capture. Text items still expose originals in their JSON
 `content`; the download endpoint currently serves file blobs only.
 

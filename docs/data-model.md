@@ -27,6 +27,13 @@ rejected because PostgreSQL UTF-8 text cannot represent them. `content_hash` is
 SHA-256 of the original UTF-8 bytes. A new capture of equal text creates another
 item and a system `duplicate_of` relation to the first live match.
 
+URL capture uses the existing schema: `kind = url`, `content` preserves the original
+URL, and `source_url` initially contains the same unchanged string. The hash is of
+the original UTF-8 bytes, not a normalized URL or fetched page. MIME stays NULL,
+and no blob or processing run is created. GET now includes nullable `source_url`
+for all kinds. Future enrichment must not overwrite `content`. Equal hashes across
+capture kinds can produce duplicate relations under the common capture contract.
+
 File capture uses the existing schema without a new migration. `item.content` is
 NULL, `original_filename` keeps the untrusted display name, `content_hash` hashes
 the exact bytes, and one `blob` row has `role = original`. MIME derives from content

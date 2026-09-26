@@ -13,12 +13,12 @@ from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from bag.auth import Identity, authenticate
-from bag.capture import capture_file, capture_text, get_item
+from bag.capture import capture_file, capture_text, capture_url, get_item
 from bag.config import Settings
 from bag.db import ready
 from bag.download import download
 from bag.logging import configure_logging
-from bag.schemas import CaptureResponse, FileCapture, ItemResponse, TextCapture
+from bag.schemas import CaptureResponse, FileCapture, ItemResponse, TextCapture, UrlCapture
 from bag.storage import CHUNK_SIZE, FileSystemStorage, StorageError, UploadTooLarge
 
 
@@ -132,6 +132,18 @@ def create_app(settings: Settings | None = None, *, worker: bool = False) -> Fas
                 raise HTTPException(422, "Conflicting idempotency keys")
             payload = payload.model_copy(update={"client_capture_id": idempotency_key})
         return capture_text(settings, actor.owner_id, payload)
+
+    @app.post("/api/v1/capture/url", response_model=CaptureResponse, status_code=201)
+    def post_url(
+        payload: UrlCapture,
+        actor: Annotated[Identity, Depends(identity)],
+        idempotency_key: Annotated[UUID | None, Header()] = None,
+    ) -> CaptureResponse:
+        if idempotency_key is not None:
+            if payload.client_capture_id not in (None, idempotency_key):
+                raise HTTPException(422, "Conflicting idempotency keys")
+            payload = payload.model_copy(update={"client_capture_id": idempotency_key})
+        return capture_url(settings, actor.owner_id, payload)
 
     @app.get("/api/v1/items/{item_id}", response_model=ItemResponse)
     def item(item_id: UUID, actor: Annotated[Identity, Depends(identity)]) -> ItemResponse:

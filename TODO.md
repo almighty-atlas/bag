@@ -2,16 +2,13 @@
 
 Actionable outstanding work only. Keep items concrete; move vague ideas to `docs/spec.md` or drop them.
 
-Phase 0, text capture and filesystem file capture/download are implemented.
-Phase 1 is not complete.
+Phase 0 and text/URL/file capture are implemented and survive container recreation.
+Token administration remains before closing Phase 1.
 
 ## Phase 1 — Remaining capture backend
 
-- [ ] Add URL capture preserving input without fetching on the capture path.
-- [ ] Extend shared capture idempotency/duplicate semantics to URL input.
 - [ ] Add administrative token creation/revocation and explicit lost-token recovery
       without replacing the user or invalidating existing tokens.
-- [ ] Verify URL originals survive full Compose restarts alongside text/files.
 
 ## Phase 2 — After capture is stable
 

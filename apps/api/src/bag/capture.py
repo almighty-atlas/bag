@@ -9,13 +9,17 @@ from fastapi import HTTPException
 from bag.config import Settings
 from bag.db import Row, connection
 from bag.ids import uuid7
-from bag.schemas import CaptureResponse, FileCapture, ItemResponse, TextCapture
+from bag.schemas import CaptureResponse, FileCapture, ItemResponse, TextCapture, UrlCapture
 from bag.storage import BlobStorage, StoredBlob
 
 logger = logging.getLogger("bag.capture")
 
 
 def capture_text(settings: Settings, owner_id: UUID, payload: TextCapture) -> CaptureResponse:
+    return _capture(settings, owner_id, payload)
+
+
+def capture_url(settings: Settings, owner_id: UUID, payload: UrlCapture) -> CaptureResponse:
     return _capture(settings, owner_id, payload)
 
 
@@ -39,7 +43,7 @@ def capture_file(
 def _capture(
     settings: Settings,
     owner_id: UUID,
-    payload: TextCapture | FileCapture,
+    payload: TextCapture | FileCapture | UrlCapture,
     source: BinaryIO | None = None,
     filename: str | None = None,
     storage: BlobStorage | None = None,
@@ -68,11 +72,19 @@ def _capture(
             )
         else:
             blob: StoredBlob | None = None
+            source_url: str | None = None
+            mime_type: str | None
             if isinstance(payload, TextCapture):
                 content: str | None = payload.content
                 digest = hashlib.sha256(payload.content.encode("utf-8")).hexdigest()
                 mime_type = "text/plain"
                 kind = "text"
+            elif isinstance(payload, UrlCapture):
+                source_url = payload.url
+                content = payload.url
+                digest = hashlib.sha256(payload.url.encode("utf-8")).hexdigest()
+                mime_type = None
+                kind = "url"
             else:
                 assert source is not None and storage is not None
                 sample = source.read(8192)
@@ -92,9 +104,9 @@ def _capture(
             item_id = uuid7()
             conn.execute(
                 "INSERT INTO item (id, owner_id, client_capture_id, kind, source, "
-                "content, user_note, content_hash, mime_type, original_filename, "
+                "content, user_note, content_hash, mime_type, original_filename, source_url, "
                 "processing_status, captured_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ready', "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ready', "
                 "coalesce(%s, now()))",
                 (
                     item_id,
@@ -107,6 +119,7 @@ def _capture(
                     digest,
                     mime_type,
                     filename,
+                    source_url,
                     payload.captured_at,
                 ),
             )
@@ -152,7 +165,7 @@ def get_item(settings: Settings, owner_id: UUID, item_id: UUID) -> ItemResponse:
     with connection(settings) as conn:
         row = conn.execute(
             "SELECT id, kind, source, content, user_note, mime_type, original_filename, "
-            "content_hash, "
+            "content_hash, source_url, "
             "processing_status, created_at, captured_at, updated_at FROM item "
             "WHERE owner_id = %s AND id = %s AND deleted_at IS NULL",
             (owner_id, item_id),

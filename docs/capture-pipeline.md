@@ -1,6 +1,6 @@
 # Capture pipeline as built
 
-JSON text capture and multipart file capture are supported.
+JSON text/URL capture and multipart file capture are supported.
 
 1. Limit the entire request body, including chunked input (default 1 MiB).
 2. Resolve ownership using a hashed bearer token. Missing, invalid or revoked tokens receive 401.
@@ -32,8 +32,28 @@ key the client cannot distinguish a lost response from a failed capture.
 Integration tests inject a deferred commit failure and verify rollback, safe retry
 and unchanged originals, along with concurrent replays and distinct same-content
 captures. Oversize requests receive 413; validation errors receive 422 without
-echoing private input. Transport timeouts belong at the reverse proxy. URL capture,
+echoing private input. Transport timeouts belong at the reverse proxy. Page fetching,
 processing, garbage collection and search remain in `TODO.md`.
+
+## URL capture
+
+`POST /api/v1/capture/url` accepts `url` plus common source/note/time/retry fields
+and optional `kind: url`. It validates absolute HTTP(S) syntax, rejects whitespace,
+controls and backslashes, and limits URLs to 8192 characters. Validation returns
+the original string without normalizing case, Unicode, port, escaping, query order
+or fragment. Both `content` and `source_url` store that exact string.
+
+No DNS, HTTP requests, redirects or blob writes occur. Private addresses are valid
+saved input, but a future fetch worker must enforce the SSRF policy independently.
+MIME stays NULL because no page was fetched. With no scheduled processors the item
+is `ready`: this means capture is stored, not that the destination is reachable or
+the page has been archived.
+
+Capture locks the owner, resolves the shared text/URL/file idempotency key, hashes
+the UTF-8 original and commits item/duplicate relation together. Replay preserves
+the original even across routes. A new key with byte-identical input creates a
+separate item with a duplicate relation. Equivalent URLs with different spellings
+are not merged. Read the original through GET item; blob download is for files.
 
 ## File capture
 

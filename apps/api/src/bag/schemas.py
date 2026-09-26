@@ -1,8 +1,9 @@
 from datetime import datetime
 from typing import Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AnyHttpUrl, AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 
 class CaptureMetadata(BaseModel):
@@ -38,6 +39,24 @@ class FileCapture(CaptureMetadata):
     kind: Literal["file"] = "file"
 
 
+class UrlCapture(CaptureMetadata):
+    url: str = Field(min_length=1, max_length=8192)
+    kind: Literal["url"] = "url"
+
+    @field_validator("url")
+    @classmethod
+    def valid_url(cls, value: str) -> str:
+        cls.postgres_text(value)
+        if any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in value) or "\\" in value:
+            raise ValueError("URL must not contain whitespace, controls or backslashes")
+        parsed = urlsplit(value)
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("An absolute HTTP(S) URL is required")
+        AnyHttpUrl(value)
+        # Validate without replacing the original with a normalized URL.
+        return value
+
+
 class CaptureResponse(BaseModel):
     id: UUID
     status: Literal["stored"] = "stored"
@@ -49,6 +68,7 @@ class ItemResponse(BaseModel):
     id: UUID
     kind: str
     source: str
+    source_url: str | None
     content: str | None
     user_note: str | None
     mime_type: str | None

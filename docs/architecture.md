@@ -22,7 +22,13 @@ owner/key constraint adds database enforcement. This trades per-owner throughput
 for simple race semantics in the single-user MVP. Text is inserted unchanged and
 acknowledged only after a synchronous PostgreSQL commit. Files first persist to the
 content-addressed filesystem and then commit item/blob/relation rows together. No
-processors are scheduled yet, so text and file items are `ready` with no processing runs.
+processors are scheduled yet, so text, URL and file items are `ready` with no processing runs.
+
+URL capture validates absolute HTTP(S) syntax and preserves the original string in
+PostgreSQL without normalization. It uses the same owner lock, idempotency namespace,
+hash-based duplicate detection and commit boundary as text/files. Neither capture
+nor validation performs DNS or HTTP requests. Private addresses can be saved; any
+future fetch worker must independently validate destinations against SSRF.
 
 `/health` needs no database; `/ready` requires the expected migration revision.
 FastAPI generates OpenAPI. Application logs are JSON with fixed event names and
