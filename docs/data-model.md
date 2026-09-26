@@ -99,7 +99,10 @@ Items captured before `0002_jobs` keep `processing_status = ready` and have no r
 or jobs until `bag reprocess` schedules the missing processors.
 
 The generated GIN-indexed `search_vector` combines simple and German/English text
-configurations over title, extracted text, URL and note. Search endpoints are pending.
+configurations over title, extracted text, URL and note. Search matches it against
+the OR of the query parsed in all three configurations. Listing pages by `id` in
+descending order, relying on the `(owner_id, id)` unique index and the UUIDv7 time
+ordering; `item_recent_idx` remains for future `created_at` ordering.
 
 No deletion API exists yet. GET hides rows with `deleted_at` set; the worker still
 processes jobs of trashed items. Foreign keys do not cascade deletion: a future

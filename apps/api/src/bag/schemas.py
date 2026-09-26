@@ -82,6 +82,38 @@ class ItemResponse(BaseModel):
     updated_at: datetime
 
 
+class ItemSummary(BaseModel):
+    id: UUID
+    kind: str
+    source: str
+    title: str | None
+    user_note: str | None
+    mime_type: str | None
+    original_filename: str | None
+    source_url: str | None
+    language: str | None
+    processing_status: str
+    created_at: datetime
+    captured_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None
+
+
+class ItemPage(BaseModel):
+    items: list[ItemSummary]
+    next_cursor: UUID | None
+
+
+class SearchResult(ItemSummary):
+    rank: float
+    snippet: str
+
+
+class SearchPage(BaseModel):
+    results: list[SearchResult]
+    next_offset: int | None
+
+
 class ProcessingRunResponse(BaseModel):
     processor: str
     status: str

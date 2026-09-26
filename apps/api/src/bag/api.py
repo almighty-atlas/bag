@@ -1,15 +1,25 @@
 import logging
 from collections.abc import Callable
 from tempfile import SpooledTemporaryFile
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 import psycopg
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import ValidationError
+from pydantic import AwareDatetime, ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -29,11 +39,14 @@ from bag.logging import configure_logging
 from bag.schemas import (
     CaptureResponse,
     FileCapture,
+    ItemPage,
     ItemResponse,
     ProcessingRunResponse,
+    SearchPage,
     TextCapture,
     UrlCapture,
 )
+from bag.search import list_items, search_items
 from bag.storage import CHUNK_SIZE, FileSystemStorage, StorageError, UploadTooLarge
 
 
@@ -164,6 +177,45 @@ def create_app(
                 raise HTTPException(422, "Conflicting idempotency keys")
             payload = payload.model_copy(update={"client_capture_id": idempotency_key})
         return capture_url(settings, actor.owner_id, payload)
+
+    Filters = Annotated[str | None, Query(min_length=1, max_length=100, pattern=r"^[a-z_-]+$")]
+    Limit = Annotated[int, Query(ge=1, le=100)]
+
+    def filter_params(
+        kind: Filters = None,
+        status: Filters = None,
+        captured_from: Annotated[AwareDatetime | None, Query(alias="from")] = None,
+        captured_to: Annotated[AwareDatetime | None, Query(alias="to")] = None,
+        trashed: bool = False,
+    ) -> dict[str, Any]:
+        return {
+            "kind": kind,
+            "status": status,
+            "captured_from": captured_from,
+            "captured_to": captured_to,
+            "trashed": trashed,
+        }
+
+    @app.get("/api/v1/items", response_model=ItemPage)
+    def items(
+        actor: Annotated[Identity, Depends(identity)],
+        filters: Annotated[dict[str, Any], Depends(filter_params)],
+        limit: Limit = 20,
+        cursor: UUID | None = None,
+    ) -> ItemPage:
+        return list_items(settings, actor.owner_id, limit=limit, cursor=cursor, **filters)
+
+    @app.get("/api/v1/search", response_model=SearchPage)
+    def search(
+        actor: Annotated[Identity, Depends(identity)],
+        filters: Annotated[dict[str, Any], Depends(filter_params)],
+        q: Annotated[str, Query(min_length=1, max_length=500)],
+        limit: Limit = 20,
+        offset: Annotated[int, Query(ge=0, le=1000)] = 0,
+    ) -> SearchPage:
+        if "\x00" in q:
+            raise HTTPException(422, "Invalid query")
+        return search_items(settings, actor.owner_id, q=q, limit=limit, offset=offset, **filters)
 
     @app.get("/api/v1/items/{item_id}", response_model=ItemResponse)
     def item(item_id: UUID, actor: Annotated[Identity, Depends(identity)]) -> ItemResponse:

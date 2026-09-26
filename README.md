@@ -4,8 +4,9 @@
 
 **Status:** text, URL and file capture implemented. Bearer authentication, durable original
 storage, authenticated file downloads, idempotent retries and duplicate relations work.
-The worker executes a PostgreSQL job queue with leases and bounded retries; two processors
-verify MIME types and extract plain text. Page fetching, search, deletion, export and
+The worker executes a PostgreSQL job queue with leases and bounded retries; processors
+verify MIME types, extract plain text and detect German/English. Items can be listed,
+filtered and searched with ranked snippets. Page fetching, deletion, export and
 clients remain pending.
 
 ## What it is
@@ -128,6 +129,27 @@ docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api b
 
 The command prints how many items and jobs were scheduled and requires `--owner UUID`
 when several users exist. Reprocessing never changes originals or notes.
+
+## Listing and search
+
+List recent items newest first and page with the returned cursor; search ranks
+matches in titles, notes, URLs and extracted text and returns a snippet with the
+matched words between `«` and `»`. German and English words are stemmed for items
+whose language was detected, so `Tasche` finds `Taschen` and `book` finds `books`.
+Quotes, `OR` and a leading `-` work as in web search engines:
+
+```sh
+curl --fail-with-body -sS "http://localhost:8000/api/v1/items?limit=20" \
+  -H "Authorization: Bearer $BAG_TOKEN"
+curl --fail-with-body -sS -G "http://localhost:8000/api/v1/search" \
+  --data-urlencode 'q=Tasche OR "local RAG"' --data-urlencode 'kind=text' \
+  -H "Authorization: Bearer $BAG_TOKEN"
+```
+
+Both endpoints accept `kind`, `status`, `from` and `to` (timezone-aware capture
+times) and `trashed=true`. Listings omit `content` and `extracted_text`; fetch the
+item by ID for those. Snippets are plain text that clients must escape before
+rendering as HTML.
 
 ## Try URL capture
 

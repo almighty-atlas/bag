@@ -87,7 +87,22 @@ and enqueues jobs, skipping processors with a queued or running job; a partial u
 index guarantees one active job per item and processor. `bag reprocess` does the same
 for all live items of an owner, by default only for processors without a run (items
 from before the queue existed or newly registered processors), optionally for failed
-runs or everything. Item listing is not implemented.
+runs or everything.
+
+## Listing and search
+
+`GET /api/v1/items` returns owner-scoped summaries (no `content` or
+`extracted_text`) newest first, paged by keyset on the UUIDv7 ID (`cursor` is the
+last ID of the previous page, `limit` 1–100). `GET /api/v1/search` parses `q` with
+`websearch_to_tsquery` (quotes, `OR`, `-`) in the `simple`, `german` and `english`
+configurations and matches the generated vector against their OR-combination, so
+stemming applies to items with a detected language while exact tokens match
+everywhere. Results carry `ts_rank_cd` and a plain-text `ts_headline` snippet over
+note, URL and extracted text with `«`/`»` markers; ordering is rank, then newest,
+paged by a bounded offset. Both endpoints accept `kind`, `status`, `from`/`to`
+(capture time, timezone required) and `trashed`. Queries that reduce to nothing
+return no results rather than an error. Tag and collection filters wait for those
+APIs; there is no semantic search.
 
 `/health` needs no database; `/ready` requires the expected migration revision.
 FastAPI generates OpenAPI. Application logs are JSON with fixed event names and
