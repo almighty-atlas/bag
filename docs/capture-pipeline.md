@@ -10,30 +10,33 @@ JSON text/URL capture and multipart file capture are supported.
 4. Reconcile the optional UUID `Idempotency-Key` header with the JSON key;
    conflicting values receive 422.
 5. Lock the owner row inside the transaction and look up the capture key. Existing
-   captures return their original ID and duplicate relation without changing data.
+   captures return their original ID, current processing status and duplicate
+   relation without changing data.
 6. For new captures, check live owner-scoped content hashes; insert the original,
-   SHA-256 hash and any system duplicate relation in one transaction.
+   SHA-256 hash, any system duplicate relation, and one pending processing run plus
+   one queued job per registered processor in one transaction.
 7. Commit with `synchronous_commit=on` before returning or logging success. The
-   response contains ID, `status: stored`, `processing_status: ready` and optional
+   response contains ID, `status: stored`, `processing_status: queued` and optional
    `duplicate_of`. Both initial capture and replay return HTTP 201.
-8. `GET /api/v1/items/{id}` reads committed original text. Unknown, foreign-owned
-   and soft-deleted rows return 404.
+8. `GET /api/v1/items/{id}` reads committed original text and, once processed,
+   `extracted_text`. Unknown, foreign-owned and soft-deleted rows return 404.
+   `GET /api/v1/items/{id}/processing` lists the runs of the item.
 
-Zero scheduled processors means text is ready immediately. No fetching, extraction,
-language detection or AI runs on capture. `text/plain` describes JSON text; it is
-not a trusted client file-MIME claim. Strings remain untrusted and future clients
-must escape them before rendering.
+No fetching, extraction, language detection or AI runs on capture. `text/plain`
+describes JSON text; it is not a trusted client file-MIME claim. Strings remain
+untrusted and future clients must escape them before rendering.
 
-Database/commit failure returns 503 without acknowledgement. If the commit succeeds
-but the HTTP response is lost, retrying the same key returns the saved item. Every
-retry-capable client should generate its key before the first attempt. Without a
-key the client cannot distinguish a lost response from a failed capture.
+Database/commit failure returns 503 without acknowledgement and schedules no jobs.
+If the commit succeeds but the HTTP response is lost, retrying the same key returns
+the saved item. Every retry-capable client should generate its key before the first
+attempt. Without a key the client cannot distinguish a lost response from a failed
+capture.
 
 Integration tests inject a deferred commit failure and verify rollback, safe retry
 and unchanged originals, along with concurrent replays and distinct same-content
 captures. Oversize requests receive 413; validation errors receive 422 without
 echoing private input. Transport timeouts belong at the reverse proxy. Page fetching,
-processing, garbage collection and search remain in `TODO.md`.
+garbage collection and search remain in `TODO.md`.
 
 ## URL capture
 
@@ -45,9 +48,9 @@ or fragment. Both `content` and `source_url` store that exact string.
 
 No DNS, HTTP requests, redirects or blob writes occur. Private addresses are valid
 saved input, but a future fetch worker must enforce the SSRF policy independently.
-MIME stays NULL because no page was fetched. With no scheduled processors the item
-is `ready`: this means capture is stored, not that the destination is reachable or
-the page has been archived.
+MIME stays NULL because no page was fetched. Both current processors skip URLs, so
+the item becomes `ready` after processing: this means capture is stored, not that
+the destination is reachable or the page has been archived.
 
 Capture locks the owner, resolves the shared text/URL/file idempotency key, hashes
 the UTF-8 original and commits item/duplicate relation together. Replay preserves
@@ -74,7 +77,7 @@ bounded signature prefix, ignores client MIME/extension, and copies the file in
 64 KiB chunks into a unique storage temporary file while computing SHA-256. The
 temporary file is flushed/fsynced, then hard-linked atomically to `ab/cd/<hash>`.
 Existing objects must match hash and size; no object is overwritten. Directories
-are fsynced before inserting item, blob and duplicate relation and committing.
+are fsynced before inserting item, blob, duplicate relation and jobs and committing.
 Temporary upload paths never depend on the original filename.
 
 Storage/commit failures cannot acknowledge a new capture. A failure after publication
@@ -89,3 +92,26 @@ no-store caching. The download filename removes path/control characters and is
 percent-encoded; the item retains the original display name. The verified handle
 is closed on success or disconnection. Missing/corrupt physical originals return
 503; missing, foreign or trashed items return 404.
+
+## Processing
+
+After commit, `bag worker` claims the queued jobs, one per transaction, and runs
+the processors with a lease. Each processor reads the item snapshot and, for files,
+the integrity-verified original; it never rewrites `content`, the blob, the note or
+the title. Per input:
+
+- Text: `mime_detect` confirms `text/plain`; `text_extract` copies `content` to
+  `extracted_text`, which feeds the generated search vector.
+- File: `mime_detect` re-derives `mime_type` and file kind from stored bytes;
+  unknown signatures that are strict UTF-8 without NUL or control bytes become
+  `text/plain`. `text_extract` decodes such text files up to 1 MiB (truncation is
+  noted in `metadata`) and skips every other format. A PDF or image is `ready`
+  with `text_extract` skipped; no PDF, OCR or image extraction exists.
+- URL: both processors skip; nothing is fetched.
+
+Retryable failures such as an unavailable or corrupt original requeue with backoff
+up to `BAG_JOB_MAX_ATTEMPTS`; the run then shows `failed` with a bounded, generic
+message while the original stays intact and downloadable. The item status follows
+the runs: `queued`, `processing`, `ready`, `partial` or `failed`. A crashed worker
+leaves an expired lease that another worker reclaims; results of a lost lease are
+discarded. Clients poll `GET /api/v1/items/{id}` or `/processing` for progress.

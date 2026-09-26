@@ -1,6 +1,6 @@
 # ADR-0002: PostgreSQL-backed processing queue
 
-**Status:** accepted
+**Status:** accepted, extended by ADR-0008
 **Date:** 2026-09-26
 
 ## Context
@@ -16,6 +16,5 @@ This foundation has an idle worker and no queue execution yet.
 
 ## Consequences
 
-No Redis dependency. Add leases, retry limits, recovery and idempotent handlers
-before scheduling work. Text with no scheduled processors is ready on commit;
-worker health does not imply that jobs are being processed.
+No Redis dependency. Leases, retry limits, recovery and handlers are specified
+in ADR-0008. Worker readiness now includes the job loop thread.

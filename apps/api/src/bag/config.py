@@ -13,3 +13,7 @@ class Settings(BaseSettings):
     max_upload_bytes: int = Field(default=52_428_800, ge=1)
     storage_path: Path = Path("./data/storage")
     worker_port: int = Field(default=8001, ge=1, le=65535)
+    worker_poll_seconds: float = Field(default=1.0, ge=0.01, le=60)
+    job_lease_seconds: int = Field(default=300, ge=1, le=86_400)
+    job_max_attempts: int = Field(default=5, ge=1, le=100)
+    job_retry_seconds: float = Field(default=5.0, ge=0, le=3600)

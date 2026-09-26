@@ -9,7 +9,15 @@ from fastapi import HTTPException
 from bag.config import Settings
 from bag.db import Row, connection
 from bag.ids import uuid7
-from bag.schemas import CaptureResponse, FileCapture, ItemResponse, TextCapture, UrlCapture
+from bag.jobs import enqueue
+from bag.schemas import (
+    CaptureResponse,
+    FileCapture,
+    ItemResponse,
+    ProcessingRunResponse,
+    TextCapture,
+    UrlCapture,
+)
 from bag.storage import BlobStorage, StoredBlob
 
 logger = logging.getLogger("bag.capture")
@@ -106,7 +114,7 @@ def _capture(
                 "INSERT INTO item (id, owner_id, client_capture_id, kind, source, "
                 "content, user_note, content_hash, mime_type, original_filename, source_url, "
                 "processing_status, captured_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ready', "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', "
                 "coalesce(%s, now()))",
                 (
                     item_id,
@@ -144,9 +152,11 @@ def _capture(
                     "relation_type, created_by) VALUES (%s, %s, %s, %s, 'duplicate_of', 'system')",
                     (uuid7(), owner_id, item_id, duplicate_id),
                 )
+            # Jobs commit with the item: a stored capture is always scheduled, never orphaned.
+            enqueue(conn, settings, owner_id, item_id)
             result = CaptureResponse(
                 id=item_id,
-                processing_status="ready",
+                processing_status="queued",
                 duplicate_of=duplicate_id,
             )
     # The connection context commits before success is returned or logged.
@@ -165,7 +175,7 @@ def get_item(settings: Settings, owner_id: UUID, item_id: UUID) -> ItemResponse:
     with connection(settings) as conn:
         row = conn.execute(
             "SELECT id, kind, source, content, user_note, mime_type, original_filename, "
-            "content_hash, source_url, "
+            "content_hash, source_url, extracted_text, "
             "processing_status, created_at, captured_at, updated_at FROM item "
             "WHERE owner_id = %s AND id = %s AND deleted_at IS NULL",
             (owner_id, item_id),
@@ -173,3 +183,21 @@ def get_item(settings: Settings, owner_id: UUID, item_id: UUID) -> ItemResponse:
     if row is None:
         raise HTTPException(404, "Item not found")
     return ItemResponse.model_validate(row)
+
+
+def get_processing(
+    settings: Settings, owner_id: UUID, item_id: UUID
+) -> list[ProcessingRunResponse]:
+    with connection(settings) as conn:
+        item = conn.execute(
+            "SELECT id FROM item WHERE owner_id = %s AND id = %s AND deleted_at IS NULL",
+            (owner_id, item_id),
+        ).fetchone()
+        if item is None:
+            raise HTTPException(404, "Item not found")
+        rows = conn.execute(
+            "SELECT processor, status, attempts, last_error, started_at, finished_at "
+            "FROM processing_run WHERE owner_id = %s AND item_id = %s ORDER BY processor",
+            (owner_id, item_id),
+        ).fetchall()
+    return [ProcessingRunResponse.model_validate(row) for row in rows]

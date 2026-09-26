@@ -7,7 +7,7 @@ from psycopg.rows import dict_row
 
 from bag.config import Settings
 
-SCHEMA_REVISION = "0001_foundation"
+SCHEMA_REVISION = "0002_jobs"
 Row = dict[str, Any]
 
 

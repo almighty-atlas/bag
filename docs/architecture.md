@@ -6,8 +6,10 @@ transactions. There is no ORM, Redis, frontend or client. Alembic uses SQLAlchem
 only to apply packaged SQL migrations.
 
 Compose starts PostgreSQL 17, `bag-api` and `bag-worker`. API and worker share a
-non-root image built from locked uv dependencies. The worker is a foundation
-service with health/readiness routes; job claiming and processors remain pending.
+non-root image built from locked uv dependencies. `bag worker` runs the job loop in
+a thread next to a health/readiness server; the worker is ready only when the schema
+revision matches and the loop thread is alive. Shutdown stops the loop and waits a
+bounded time for the current job; leases recover anything cut off.
 Migrations never run automatically. `bag migrate` and `bag init` are explicit
 server administration commands. Bootstrap uses a transaction-scoped advisory lock,
 creates one user and prints one random token after commit. Repeating it changes nothing.
@@ -32,14 +34,51 @@ Capture locks the owner row to serialize idempotency and duplicate checks. A uni
 owner/key constraint adds database enforcement. This trades per-owner throughput
 for simple race semantics in the single-user MVP. Text is inserted unchanged and
 acknowledged only after a synchronous PostgreSQL commit. Files first persist to the
-content-addressed filesystem and then commit item/blob/relation rows together. No
-processors are scheduled yet, so text, URL and file items are `ready` with no processing runs.
+content-addressed filesystem and then commit item/blob/relation rows together. The
+same transaction inserts one `processing_run` and one `job` per registered processor,
+so an acknowledged capture is always scheduled and a failed commit schedules nothing.
+The capture response reports `processing_status: queued`.
 
 URL capture validates absolute HTTP(S) syntax and preserves the original string in
 PostgreSQL without normalization. It uses the same owner lock, idempotency namespace,
 hash-based duplicate detection and commit boundary as text/files. Neither capture
 nor validation performs DNS or HTTP requests. Private addresses can be saved; any
 future fetch worker must independently validate destinations against SSRF.
+
+## Processing
+
+The worker claims one job per transaction: a `FOR UPDATE SKIP LOCKED` query selects
+the oldest queued job whose `run_after` has passed, or a running job whose lease has
+expired, increments `attempts`, records the worker ID and sets a lease
+(`BAG_JOB_LEASE_SECONDS`). The matching run becomes `running` and the item
+`processing` before the claim commits. The processor then runs outside any
+transaction, reading originals through the verified storage handle.
+
+Processors are pure functions returning `succeeded` or `skipped` with updates limited
+to `mime_type`, `kind`, `extracted_text` and `language` plus per-processor metadata.
+A finalize transaction re-locks the job, verifies that this worker still holds it,
+writes the updates, marks run and job, and derives the item status from all runs in
+SQL: `queued` before any start, `processing` while any run is pending or running,
+`ready` when nothing failed, `failed` when nothing succeeded, otherwise `partial`.
+Results arriving after a lost lease are discarded. Retryable failures requeue with
+exponential backoff from `BAG_JOB_RETRY_SECONDS`, capped at one hour, until
+`BAG_JOB_MAX_ATTEMPTS`; permanent failures and reclaims past the limit fail the run.
+Unexpected exceptions record only the exception class. Deterministic database limits
+such as the search vector size fail the run permanently instead of retrying.
+
+Two processors exist. `mime_detect` re-verifies files from stored bytes (signature
+library plus a strict UTF-8 plain-text check), sets `mime_type` and re-derives file
+kinds; text items are `text/plain` and URLs are skipped. `text_extract` copies text
+originals and decodes UTF-8 text files up to 1 MiB into `extracted_text`, noting
+truncation in `metadata`; other content is skipped. No PDF, image or URL extraction
+exists. Because `search_vector` is a generated column, extraction immediately makes
+items searchable once search endpoints exist. Every capture enqueues both processors
+regardless of kind; the worker log records claim and outcome with job, item, owner
+and processor IDs and the attempt number, never content or error details.
+
+`GET /api/v1/items/{id}/processing` lists runs with status, attempts, last error and
+timing for owned, live items. `GET /api/v1/items/{id}` includes `extracted_text`.
+Reprocessing and item listing are not implemented.
 
 `/health` needs no database; `/ready` requires the expected migration revision.
 FastAPI generates OpenAPI. Application logs are JSON with fixed event names and
@@ -60,10 +99,11 @@ The store requires a POSIX filesystem with hard links and directory fsync; remot
 or S3 storage is not implemented. Duplicate objects are integrity-checked before reuse.
 
 Content signatures are detected with the pure-Python `filetype` library using a
-bounded prefix. Unknown formats use `application/octet-stream`. No archive extraction
-or rendering happens. Downloads check SHA-256 and size before response, use the same
-verified file handle, force attachment/octet-stream and close it even on disconnect.
-Storage errors yield a generic 503; neither original bytes nor filenames enter logs.
+bounded prefix. Unknown formats use `application/octet-stream` at capture and may
+become `text/plain` after processing. No archive extraction or rendering happens.
+Downloads check SHA-256 and size before response, use the same verified file handle,
+force attachment/octet-stream and close it even on disconnect. Storage errors yield
+a generic 503; neither original bytes nor filenames enter logs.
 
 Crashes may leave unpublished `.upload-*` files or published objects without a
 database reference. They are deliberately retained: cleanup/garbage collection is
@@ -76,4 +116,7 @@ README documents exact startup, update and backup commands.
 CI uses actual PostgreSQL 17 for persistence, parallel text/file capture, ownership,
 commit failure, bootstrap and migration round trips. Storage tests exercise atomic
 publication, fsync failure, corruption, size limits and racing writers. Download
-disconnects are tested. AI and extractors are not implemented.
+disconnects are tested. Processing tests cover transactional enqueue, enrichment of
+text, files and URLs, bounded retries, backoff, lease expiry and stale results,
+concurrent workers executing every job exactly once, and permanent failure on the
+search vector limit. AI and complex extractors are not implemented.

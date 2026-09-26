@@ -4,8 +4,9 @@
 
 **Status:** text, URL and file capture implemented. Bearer authentication, durable original
 storage, authenticated file downloads, idempotent retries and duplicate relations work.
-Page fetching, processing, search and clients remain pending. The worker exposes health/readiness;
-it does not execute jobs yet.
+The worker executes a PostgreSQL job queue with leases and bounded retries; two processors
+verify MIME types and extract plain text. Page fetching, search, deletion, export and
+clients remain pending.
 
 ## What it is
 
@@ -65,20 +66,51 @@ if both keys are supplied they must match. Reusing a key returns the original it
 even if the payload changes. Equal text with a new key creates another item and
 reports `duplicate_of`. Text is returned as JSON and must be escaped when displayed.
 
+The capture response reports `processing_status: queued`. Within about a second the
+worker runs the processors; `GET /api/v1/items/{id}` then shows `processing_status:
+ready` and `extracted_text`. Per-processor state is available at
+`GET /api/v1/items/{id}/processing`, see below.
+
 API docs: <http://localhost:8000/docs>; OpenAPI: <http://localhost:8000/openapi.json>.
 `/health` checks liveness; `/ready` checks PostgreSQL and the expected schema revision.
 Both API and worker expose these endpoints.
 
-## Try URL capture
+## Processing and enrichment
 
-Update existing installations:
+Update existing installations. This version adds a migration for the job queue, so
+run `bag migrate` before starting the new containers; until then `/ready` reports
+`not_ready` on purpose. Tokens and data are preserved:
 
 ```sh
-docker compose --env-file .env -f deploy/compose/compose.yaml up -d --build
+docker compose --env-file .env -f deploy/compose/compose.yaml build
+docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api bag migrate
+docker compose --env-file .env -f deploy/compose/compose.yaml up -d bag-api bag-worker
 ```
 
-No new migration or token is needed. In <http://localhost:8000/docs>, authorize and
-try `POST /api/v1/capture/url`:
+Every capture schedules two processors in the same transaction as the item:
+`mime_detect` verifies the type from stored bytes and `text_extract` fills
+`extracted_text` for text captures and UTF-8 text files (up to 1 MiB). PDFs, images,
+other binaries and URLs are stored unchanged and skipped by extraction. The worker
+claims one job at a time, retries failures with exponential backoff up to
+`BAG_JOB_MAX_ATTEMPTS`, and takes over jobs whose lease (`BAG_JOB_LEASE_SECONDS`)
+expired after a crash. Originals are never modified by processing.
+
+```sh
+curl --fail-with-body -sS "http://localhost:8000/api/v1/items/$ITEM_ID/processing" \
+  -H "Authorization: Bearer $BAG_TOKEN"
+```
+
+Each entry shows `processor`, `status` (`pending`, `running`, `succeeded`, `failed`
+or `skipped`), `attempts`, a short `last_error` and timestamps. The item's
+`processing_status` summarizes them: `queued`, `processing`, `ready`, `partial`
+(some processor failed) or `failed`. Items captured before this version stay `ready`
+without runs; a reprocess command is planned. Worker logs record job, item and
+processor IDs but never content. If the worker is stopped, captures still succeed
+and remain queued until it returns; `docker compose logs bag-worker` shows progress.
+
+## Try URL capture
+
+In <http://localhost:8000/docs>, authorize and try `POST /api/v1/capture/url`:
 
 ```json
 {
@@ -92,21 +124,15 @@ Use the returned ID with `GET /api/v1/items/{item_id}`. Both `content` and
 and retry keys work as for text/file capture. Only absolute HTTP(S) URLs up to
 8192 characters are accepted; whitespace, controls and backslashes are rejected.
 URLs are not normalized or fetched, including private addresses. No title, page
-snapshot or page MIME is available yet. Future fetching must apply independent
+snapshot or page MIME is available yet; both processors skip URLs, so the item
+becomes `ready` without any network access. Future fetching must apply independent
 SSRF checks; accepting a URL is not permission to fetch it.
 
 ## Try file capture
 
-Existing installations can update without replacing `.env` or the token:
-
-```sh
-docker compose --env-file .env -f deploy/compose/compose.yaml build
-docker compose --env-file .env -f deploy/compose/compose.yaml up -d
-```
-
-No new database migration is needed for this slice. Compose creates a persistent
-`bag-storage` volume automatically. New environment options have defaults, so an
-existing `.env` continues to work. In <http://localhost:8000/docs>, authorize with
+Compose creates a persistent `bag-storage` volume automatically. New environment
+options have defaults, so an existing `.env` continues to work. In
+<http://localhost:8000/docs>, authorize with
 your token, open `POST /api/v1/capture/file`, choose **Try it out**, select a file
 and leave `metadata` as `{}`. Execute, then use the returned ID in
 `GET /api/v1/items/{item_id}/content` to download the original.
@@ -130,9 +156,11 @@ unset BAG_TOKEN
 
 Files are limited to 50 MiB by default (`BAG_MAX_UPLOAD_BYTES`); empty files are
 allowed. Metadata supports the same note, source, capture time and retry key as text.
-File signatures determine the stored MIME type; unrecognized formats safely fall
-back to `application/octet-stream`. The client MIME and filename extension are ignored.
-Downloads always use an attachment with `nosniff`, even for recognized images or HTML.
+File signatures determine the stored MIME type; unrecognized formats fall back to
+`application/octet-stream`, and the worker later reclassifies strict UTF-8 text as
+`text/plain` with its content in `extracted_text`. The client MIME and filename
+extension are ignored. Downloads always use an attachment with `nosniff`, even for
+recognized images or HTML.
 
 Files with equal bytes share physical storage, while separate captures keep their
 own notes and filenames. Keys are shared across text/URL/file routes: a reused key
@@ -211,12 +239,14 @@ and require the database name to end in `_test`. Never use the application datab
 Without the variable integration tests skip. CI always runs the full PostgreSQL 17
 suite, lint, strict type checking, Python packaging and the container build.
 
-For host-based development, with PostgreSQL running and `.env` configured:
+For host-based development, with PostgreSQL running and `.env` configured, run the
+API and, in a second terminal, the worker:
 
 ```sh
 uv run bag migrate
 uv run bag init
 uv run uvicorn bag.api:create_app --factory --reload --no-access-log
+uv run bag worker
 ```
 
 ## Deployment and backup
@@ -247,7 +277,9 @@ and bytes; verify downloads before switching services. Neither component alone i
 complete backup. `docker compose down` preserves data; `down -v` destroys volumes.
 For updates: back up, build, explicitly run `bag migrate`, then recreate API/worker
 with the quickstart commands. Tokens remain valid across restarts; use the server-side
-recovery command above if the plaintext credential was lost.
+recovery command above if the plaintext credential was lost. Stopping the worker
+during a backup is safe: a job interrupted mid-run is retried after its lease expires,
+and queued jobs wait.
 
 ## Planned stack
 

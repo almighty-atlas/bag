@@ -1,6 +1,7 @@
 import argparse
 import json
 import secrets
+import threading
 from dataclasses import asdict
 from pathlib import Path
 from uuid import UUID
@@ -15,7 +16,11 @@ from bag.auth import token_hash
 from bag.config import Settings
 from bag.db import connection
 from bag.ids import uuid7
+from bag.storage import FileSystemStorage
 from bag.tokens import TokenAdminError, create_token, list_tokens, revoke_token
+from bag.worker import Worker
+
+SHUTDOWN_GRACE_SECONDS = 30
 
 
 def migration_config() -> Config:
@@ -89,10 +94,23 @@ def main() -> None:
             else "Already initialized; no token changed."
         )
     else:
-        settings = Settings()
+        run_worker(Settings())
+
+
+def run_worker(settings: Settings) -> None:
+    stop = threading.Event()
+    worker = Worker(settings, FileSystemStorage(settings.storage_path))
+    thread = threading.Thread(target=worker.run_forever, args=(stop,), daemon=True)
+    thread.start()
+    try:
+        # Readiness reports the job loop; the health server handles shutdown signals.
         uvicorn.run(
-            create_app(settings, worker=True),
+            create_app(settings, worker=True, worker_alive=thread.is_alive),
             host="0.0.0.0",
             port=settings.worker_port,
             access_log=False,
         )
+    finally:
+        stop.set()
+        # Let a running job record its result; the lease recovers anything cut off here.
+        thread.join(timeout=SHUTDOWN_GRACE_SECONDS)

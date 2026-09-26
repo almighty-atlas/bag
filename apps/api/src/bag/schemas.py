@@ -74,7 +74,17 @@ class ItemResponse(BaseModel):
     mime_type: str | None
     original_filename: str | None
     content_hash: str | None
+    extracted_text: str | None
     processing_status: str
     created_at: datetime
     captured_at: datetime
     updated_at: datetime
+
+
+class ProcessingRunResponse(BaseModel):
+    processor: str
+    status: str
+    attempts: int
+    last_error: str | None
+    started_at: datetime | None
+    finished_at: datetime | None

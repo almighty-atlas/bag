@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from tempfile import SpooledTemporaryFile
 from typing import Annotated
 from uuid import UUID
@@ -13,12 +14,19 @@ from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from bag.auth import Identity, authenticate
-from bag.capture import capture_file, capture_text, capture_url, get_item
+from bag.capture import capture_file, capture_text, capture_url, get_item, get_processing
 from bag.config import Settings
 from bag.db import ready
 from bag.download import download
 from bag.logging import configure_logging
-from bag.schemas import CaptureResponse, FileCapture, ItemResponse, TextCapture, UrlCapture
+from bag.schemas import (
+    CaptureResponse,
+    FileCapture,
+    ItemResponse,
+    ProcessingRunResponse,
+    TextCapture,
+    UrlCapture,
+)
 from bag.storage import CHUNK_SIZE, FileSystemStorage, StorageError, UploadTooLarge
 
 
@@ -69,7 +77,12 @@ class RequestSizeLimit:
             await self.app(scope, bounded_receive, send)
 
 
-def create_app(settings: Settings | None = None, *, worker: bool = False) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    worker: bool = False,
+    worker_alive: Callable[[], bool] | None = None,
+) -> FastAPI:
     settings = settings or Settings()
     configure_logging()
     app = FastAPI(title="Bag of Holding worker" if worker else "Bag of Holding", version="0.1.0")
@@ -104,7 +117,7 @@ def create_app(settings: Settings | None = None, *, worker: bool = False) -> Fas
 
     @app.get("/ready")
     def readiness() -> JSONResponse:
-        is_ready = ready(settings)
+        is_ready = ready(settings) and (worker_alive is None or worker_alive())
         return JSONResponse(
             {"status": "ready" if is_ready else "not_ready"},
             200 if is_ready else 503,
@@ -148,6 +161,12 @@ def create_app(settings: Settings | None = None, *, worker: bool = False) -> Fas
     @app.get("/api/v1/items/{item_id}", response_model=ItemResponse)
     def item(item_id: UUID, actor: Annotated[Identity, Depends(identity)]) -> ItemResponse:
         return get_item(settings, actor.owner_id, item_id)
+
+    @app.get("/api/v1/items/{item_id}/processing", response_model=list[ProcessingRunResponse])
+    def processing(
+        item_id: UUID, actor: Annotated[Identity, Depends(identity)]
+    ) -> list[ProcessingRunResponse]:
+        return get_processing(settings, actor.owner_id, item_id)
 
     @app.post("/api/v1/capture/file", response_model=CaptureResponse, status_code=201)
     def post_file(

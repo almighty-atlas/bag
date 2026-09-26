@@ -192,7 +192,8 @@ def test_commit_failure_never_acknowledges_and_retry_succeeds(
         assert response.status_code == 503
         assert "private text" not in response.text
         with connection(settings) as conn:
-            assert conn.execute("SELECT count(*) AS count FROM item").fetchone() == {"count": 0}
+            for table in ("item", "processing_run", "job"):
+                assert conn.execute(f"SELECT count(*) AS n FROM {table}").fetchone() == {"n": 0}
     finally:
         with connection(settings) as conn:
             conn.execute(

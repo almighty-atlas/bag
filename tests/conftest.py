@@ -22,7 +22,12 @@ def settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Settin
         pytest.fail("Test database name must end in _test; tests clear its Bag tables")
     monkeypatch.setenv("BAG_DATABASE_URL", url)
     command.upgrade(migration_config(), "head")
-    value = Settings(database_url=SecretStr(url), storage_path=tmp_path / "storage")
+    value = Settings(
+        database_url=SecretStr(url),
+        storage_path=tmp_path / "storage",
+        job_max_attempts=3,
+        job_retry_seconds=0,
+    )
     with connection(value) as conn:
         conn.execute('TRUNCATE TABLE "user" CASCADE')
     yield value
