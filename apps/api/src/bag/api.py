@@ -17,7 +17,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import AwareDatetime, ValidationError
 from starlette.concurrency import run_in_threadpool
@@ -31,6 +31,8 @@ from bag.capture import (
     get_item,
     get_processing,
     reprocess_item,
+    restore_item,
+    trash_item,
 )
 from bag.config import Settings
 from bag.db import ready
@@ -220,6 +222,15 @@ def create_app(
     @app.get("/api/v1/items/{item_id}", response_model=ItemResponse)
     def item(item_id: UUID, actor: Annotated[Identity, Depends(identity)]) -> ItemResponse:
         return get_item(settings, actor.owner_id, item_id)
+
+    @app.delete("/api/v1/items/{item_id}", status_code=204)
+    def trash(item_id: UUID, actor: Annotated[Identity, Depends(identity)]) -> Response:
+        trash_item(settings, actor.owner_id, item_id)
+        return Response(status_code=204)
+
+    @app.post("/api/v1/items/{item_id}/restore", response_model=ItemResponse)
+    def restore(item_id: UUID, actor: Annotated[Identity, Depends(identity)]) -> ItemResponse:
+        return restore_item(settings, actor.owner_id, item_id)
 
     @app.get("/api/v1/items/{item_id}/processing", response_model=list[ProcessingRunResponse])
     def processing(

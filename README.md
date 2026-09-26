@@ -151,6 +151,24 @@ times) and `trashed=true`. Listings omit `content` and `extracted_text`; fetch t
 item by ID for those. Snippets are plain text that clients must escape before
 rendering as HTML.
 
+## Trash and restore
+
+Deleting moves an item to the trash: it vanishes from listings, search, detail and
+download, but nothing is removed from the database or storage. Restore brings it
+back unchanged. Both calls are safe to repeat:
+
+```sh
+curl --fail-with-body -sS -X DELETE "http://localhost:8000/api/v1/items/$ITEM_ID" \
+  -H "Authorization: Bearer $BAG_TOKEN"
+curl --fail-with-body -sS "http://localhost:8000/api/v1/items?trashed=true" \
+  -H "Authorization: Bearer $BAG_TOKEN"
+curl --fail-with-body -sS -X POST "http://localhost:8000/api/v1/items/$ITEM_ID/restore" \
+  -H "Authorization: Bearer $BAG_TOKEN"
+```
+
+Permanent removal with a retention period and storage cleanup is not implemented
+yet; trashed items keep their space until then.
+
 ## Try URL capture
 
 In <http://localhost:8000/docs>, authorize and try `POST /api/v1/capture/url`:

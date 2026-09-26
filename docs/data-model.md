@@ -104,8 +104,11 @@ the OR of the query parsed in all three configurations. Listing pages by `id` in
 descending order, relying on the `(owner_id, id)` unique index and the UUIDv7 time
 ordering; `item_recent_idx` remains for future `created_at` ordering.
 
-No deletion API exists yet. GET hides rows with `deleted_at` set; the worker still
-processes jobs of trashed items. Foreign keys do not cascade deletion: a future
+Deletion is soft: `DELETE` sets `deleted_at` (kept on repeats), restore clears it,
+and both bump `updated_at` only when the state changes. Detail routes hide rows
+with `deleted_at` set; listings and search expose them with `trashed=true`. The
+worker still processes jobs of trashed items, replays still resolve them, and
+duplicate detection ignores them. Foreign keys do not cascade deletion: a future
 explicit purge must remove jobs, runs and references in order and collect shared
 storage only after the last live or trashed reference is gone.
 

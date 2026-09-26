@@ -89,6 +89,12 @@ for all live items of an owner, by default only for processors without a run (it
 from before the queue existed or newly registered processors), optionally for failed
 runs or everything.
 
+`DELETE /api/v1/items/{id}` sets `deleted_at` and `POST /api/v1/items/{id}/restore`
+clears it; both are idempotent and owner-scoped. Trashed items disappear from
+detail, download, processing and default listings but remain listable and
+searchable with `trashed=true`. Nothing is removed from PostgreSQL or storage;
+purge and garbage collection are pending explicit jobs.
+
 ## Listing and search
 
 `GET /api/v1/items` returns owner-scoped summaries (no `content` or

@@ -190,6 +190,34 @@ def get_item(settings: Settings, owner_id: UUID, item_id: UUID) -> ItemResponse:
     return ItemResponse.model_validate(row)
 
 
+def trash_item(settings: Settings, owner_id: UUID, item_id: UUID) -> None:
+    """Soft-delete; repeating it on a trashed item is a no-op, unknown items are 404."""
+    with connection(settings) as conn:
+        row = conn.execute(
+            "UPDATE item SET deleted_at = coalesce(deleted_at, now()), "
+            "updated_at = CASE WHEN deleted_at IS NULL THEN now() ELSE updated_at END "
+            "WHERE owner_id = %s AND id = %s RETURNING id",
+            (owner_id, item_id),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(404, "Item not found")
+    logger.info("item_trashed", extra={"item_id": item_id, "owner_id": owner_id})
+
+
+def restore_item(settings: Settings, owner_id: UUID, item_id: UUID) -> ItemResponse:
+    with connection(settings) as conn:
+        row = conn.execute(
+            "UPDATE item SET deleted_at = NULL, "
+            "updated_at = CASE WHEN deleted_at IS NULL THEN updated_at ELSE now() END "
+            "WHERE owner_id = %s AND id = %s RETURNING id",
+            (owner_id, item_id),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(404, "Item not found")
+    logger.info("item_restored", extra={"item_id": item_id, "owner_id": owner_id})
+    return get_item(settings, owner_id, item_id)
+
+
 def _runs(
     conn: psycopg.Connection[Row], owner_id: UUID, item_id: UUID
 ) -> list[ProcessingRunResponse]:
