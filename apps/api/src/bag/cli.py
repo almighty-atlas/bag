@@ -127,6 +127,12 @@ def main() -> None:
         try:
             if args.stdin:
                 password = sys.stdin.readline().rstrip("\r\n")
+            elif not sys.stdin.isatty():
+                parser.exit(
+                    1,
+                    "No terminal to hide the password; run this in an interactive terminal "
+                    "or pipe one line into `bag password set --stdin`.\n",
+                )
             else:
                 password = getpass.getpass("New password: ")
                 if password != getpass.getpass("Repeat password: "):
