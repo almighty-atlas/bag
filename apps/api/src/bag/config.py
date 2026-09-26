@@ -24,3 +24,6 @@ class Settings(BaseSettings):
     fetch_max_redirects: int = Field(default=5, ge=0, le=20)
     cookie_secure: bool = True
     session_days: int = Field(default=30, ge=1, le=365)
+    login_max_failures: int = Field(default=10, ge=1, le=1000)
+    login_window_seconds: float = Field(default=900.0, ge=1, le=86_400)
+    job_retention_days: int = Field(default=7, ge=0, le=3650)

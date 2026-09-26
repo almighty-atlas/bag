@@ -13,11 +13,9 @@ collections with filters, and `bag export`.
 
 ## Phase 2 — Processing and search
 
-- [ ] Serve `snapshot` blobs through the API (sanitized or sandboxed, never rendered inline).
 - [ ] Add `metadata` and `image_meta` processors (basic file/image metadata) and
       decide on PDF text extraction in an ADR before adding a dependency.
 - [ ] Add rename/delete for tags and collections (assignments must go with them).
-- [ ] Prune completed `job` rows after a retention period.
 - [ ] Decide whether the worker should run `purge`/`gc` on a schedule or leave it to cron.
 - [ ] Add `bag import <dir>` reading export format version 1, idempotent by item ID.
 
@@ -27,7 +25,6 @@ collections with filters, and `bag export`.
       keyboard shortcut for capture.
 - [ ] Web: an end-to-end smoke in CI against the running stack (login, capture, search).
 - [ ] PWA: POST share target with a service worker so shared files reach capture.
-- [ ] Rate-limit login attempts per username and address.
 
 ## Later phases
 

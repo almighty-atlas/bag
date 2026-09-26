@@ -95,6 +95,34 @@ def test_session_expiry_and_secure_flag(settings: Settings, client: TestClient, 
         assert "Secure" in response.headers["set-cookie"]
 
 
+def test_login_rate_limit(settings: Settings, token: str) -> None:
+    set_password(settings, "atlas", PASSWORD, None)
+    limited = settings.model_copy(update={"login_max_failures": 3, "login_window_seconds": 60})
+    with TestClient(create_app(limited)) as client:
+        for _ in range(3):
+            wrong = client.post(
+                "/api/v1/session", json={"username": "atlas", "password": "x" * 10}, headers=CSRF
+            )
+            assert wrong.status_code == 401
+        blocked = client.post(
+            "/api/v1/session", json={"username": "atlas", "password": PASSWORD}, headers=CSRF
+        )
+        assert blocked.status_code == 429 and int(blocked.headers["retry-after"]) >= 1
+        # The address is limited too: a different username from the same client waits.
+        other = client.post(
+            "/api/v1/session", json={"username": "nobody", "password": PASSWORD}, headers=CSRF
+        )
+        assert other.status_code == 429
+    with TestClient(create_app(limited)) as fresh:
+        # A new process (or an expired window) starts clean; success resets the count.
+        assert (
+            fresh.post(
+                "/api/v1/session", json={"username": "atlas", "password": PASSWORD}, headers=CSRF
+            ).status_code
+            == 200
+        )
+
+
 def test_token_management_requires_session(
     settings: Settings,
     client: TestClient,

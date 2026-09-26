@@ -210,7 +210,8 @@ docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api b
 
 `bag gc` briefly pauses captures while it deletes a batch and skips files younger
 than one hour (`--min-age-hours`). Purged items cannot be restored; take a backup
-first if in doubt.
+first if in doubt. `bag purge` also drops finished job rows older than
+`BAG_JOB_RETENTION_DAYS` (default 7); processing state per item is unaffected.
 
 ## Try URL capture
 
@@ -232,8 +233,10 @@ the page: it resolves the host, refuses private, loopback and link-local address
 connects only to the checked address, follows up to five re-checked redirects and
 reads at most `BAG_FETCH_MAX_BYTES` (5 MiB). The page is kept as a snapshot, its
 title fills an empty `title`, and HTML or plain text becomes searchable
-`extracted_text`. A refused destination is reported as `skipped` in the
-`url_fetch` run, not as an error. Set `BAG_FETCH_URLS=false` to keep the worker
+`extracted_text`. The stored page is available as a download at
+`GET /api/v1/items/{id}/snapshot` (always an attachment, never rendered by the
+API). A refused destination is reported as `skipped` in the `url_fetch` run, not
+as an error. Set `BAG_FETCH_URLS=false` to keep the worker
 offline; the only outbound request Bag ever makes is this GET to the saved URL's
 own host.
 

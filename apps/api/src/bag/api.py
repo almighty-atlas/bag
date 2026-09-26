@@ -42,6 +42,7 @@ from bag.db import connection, ready
 from bag.download import download
 from bag.logging import configure_logging
 from bag.organize import Kind, create_named, list_named
+from bag.ratelimit import FailureLimiter
 from bag.schemas import (
     CaptureResponse,
     FileCapture,
@@ -208,15 +209,30 @@ def create_app(
             raise HTTPException(403, "Sign in with a password to manage tokens")
         return actor
 
+    limiter = FailureLimiter(settings.login_max_failures, settings.login_window_seconds)
+
     @app.post("/api/v1/session", response_model=SessionResponse)
     def create_session(
         payload: LoginRequest, request: Request, response: Response
     ) -> SessionResponse:
         csrf_guard(request)
+        client = request.client.host if request.client else "unknown"
+        keys = (f"user:{payload.username.strip()}", f"addr:{client}")
+        waits = [wait for wait in (limiter.retry_after(key) for key in keys) if wait is not None]
+        if waits:
+            raise HTTPException(
+                429,
+                "Too many failed logins; try again later",
+                headers={"Retry-After": str(int(max(waits)) + 1)},
+            )
         try:
             token, expires = login(settings, payload.username, payload.password)
         except LoginError as exc:
+            for key in keys:
+                limiter.record_failure(key)
             raise HTTPException(401, "Invalid username or password") from exc
+        for key in keys:
+            limiter.reset(key)
         response.set_cookie(
             COOKIE_NAME,
             token,
@@ -417,5 +433,9 @@ def create_app(
     @app.get("/api/v1/items/{item_id}/content")
     def original(item_id: UUID, actor: Annotated[Identity, Depends(identity)]) -> StreamingResponse:
         return download(settings, actor.owner_id, item_id, storage)
+
+    @app.get("/api/v1/items/{item_id}/snapshot")
+    def snapshot(item_id: UUID, actor: Annotated[Identity, Depends(identity)]) -> StreamingResponse:
+        return download(settings, actor.owner_id, item_id, storage, "snapshot")
 
     return app

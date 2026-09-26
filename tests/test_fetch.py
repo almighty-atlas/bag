@@ -232,6 +232,15 @@ def test_url_fetch_stores_snapshots_and_respects_policy(
     assert {row["id"] for row in hits} == {ids["page"], ids["redirect"], titled}
     assert client.get(f"/api/v1/items/{titled}", headers=headers).json()["title"] == "Eigener Titel"
     assert client.get(f"/api/v1/items/{ids['page']}/content", headers=headers).status_code == 404
+    snapshot = client.get(f"/api/v1/items/{ids['page']}/snapshot", headers=headers)
+    assert snapshot.status_code == 200 and snapshot.content == PAGE
+    assert snapshot.headers["content-type"] == "application/octet-stream"
+    assert snapshot.headers["content-disposition"].startswith("attachment;")
+    assert snapshot.headers["content-disposition"].endswith(".html")
+    assert snapshot.headers["content-security-policy"] == "sandbox"
+    assert (
+        client.get(f"/api/v1/items/{ids['private']}/snapshot", headers=headers).status_code == 404
+    )
 
     assert item("latin")["title"] == "Größe" and item("latin")["extracted_text"] == "Käse"
     assert item("pdf")["mime_type"] == "application/pdf"

@@ -1,4 +1,4 @@
-from typing import BinaryIO
+from typing import BinaryIO, Literal
 from urllib.parse import quote
 from uuid import UUID
 
@@ -9,6 +9,14 @@ from starlette.types import Receive, Scope, Send
 from bag.config import Settings
 from bag.db import connection
 from bag.storage import BlobStorage, StoredBlob, chunks
+
+Role = Literal["original", "snapshot"]
+SNAPSHOT_EXTENSIONS = {
+    "text/html": ".html",
+    "application/xhtml+xml": ".xhtml",
+    "text/plain": ".txt",
+    "application/pdf": ".pdf",
+}
 
 
 class OriginalResponse(StreamingResponse):
@@ -23,27 +31,37 @@ class OriginalResponse(StreamingResponse):
             self.source.close()
 
 
+def safe_filename(name: str | None, fallback: str) -> str:
+    # Display names cannot inject headers or turn into download destination paths.
+    candidate = (name or fallback).replace("\\", "/").split("/")[-1]
+    return "".join(c for c in candidate if c.isprintable()).strip(" .") or fallback
+
+
 def download(
     settings: Settings,
     owner_id: UUID,
     item_id: UUID,
     storage: BlobStorage,
+    role: Role = "original",
 ) -> StreamingResponse:
     with connection(settings) as conn:
         row = conn.execute(
-            "SELECT b.storage_key, b.sha256, b.size_bytes, i.original_filename "
-            "FROM blob b JOIN item i ON (i.owner_id = b.owner_id AND i.id = b.item_id) "
+            "SELECT b.storage_key, b.sha256, b.size_bytes, b.mime_type, i.original_filename, "
+            "i.title FROM blob b JOIN item i ON (i.owner_id = b.owner_id AND i.id = b.item_id) "
             "WHERE i.owner_id = %s AND i.id = %s AND i.deleted_at IS NULL "
-            "AND b.role = 'original' ORDER BY b.created_at, b.id LIMIT 1",
-            (owner_id, item_id),
+            "AND b.role = %s ORDER BY b.created_at, b.id LIMIT 1",
+            (owner_id, item_id, role),
         ).fetchone()
     if row is None:
-        raise HTTPException(404, "Original not found")
+        raise HTTPException(404, f"{role.capitalize()} not found")
     blob = StoredBlob(row["sha256"], row["size_bytes"], row["storage_key"])
     source: BinaryIO = storage.open_verified(blob)
-    # Display names cannot inject headers or turn into download destination paths.
-    filename = (row["original_filename"] or "download").replace("\\", "/").split("/")[-1]
-    filename = "".join(c for c in filename if c.isprintable()).strip(" .") or "download"
+    if role == "original":
+        filename = safe_filename(row["original_filename"], "download")
+    else:
+        extension = SNAPSHOT_EXTENSIONS.get(row["mime_type"], "")
+        filename = safe_filename(row["title"], "snapshot")[:120] + extension
+    # Always an attachment with a sandbox: fetched pages and uploads are untrusted.
     return OriginalResponse(
         source,
         headers={

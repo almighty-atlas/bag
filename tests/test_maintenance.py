@@ -11,6 +11,7 @@ from bag.config import Settings
 from bag.db import connection
 from bag.ids import uuid7
 from bag.maintenance import collect_garbage, purge_items
+from bag.processors import PROCESSORS
 from bag.storage import FileSystemStorage, StorageError
 from bag.worker import Worker
 from fastapi.testclient import TestClient
@@ -71,10 +72,32 @@ def test_purge_respects_retention_and_removes_rows_not_objects(
         conn.execute(
             "UPDATE item SET deleted_at = now() - interval '31 days' WHERE id = %s", (first,)
         )
-    assert purge_items(settings, dry_run=True) == {"expired": 1, "purged": 0}
+    with connection(settings) as conn:
+        # One finished job is old enough to prune; running and recent ones stay.
+        conn.execute(
+            "UPDATE job SET updated_at = now() - interval '8 days' WHERE id = "
+            "(SELECT id FROM job WHERE item_id = %s AND status = 'succeeded' LIMIT 1)",
+            (text["id"],),
+        )
+        conn.execute(
+            "UPDATE job SET status = 'running', lease_expires_at = now() + interval '1 hour', "
+            "updated_at = now() - interval '8 days' WHERE id = "
+            "(SELECT id FROM job WHERE item_id = %s AND status = 'succeeded' LIMIT 1)",
+            (text["id"],),
+        )
+        total = conn.execute("SELECT count(*) AS n FROM job").fetchone()
+        assert total is not None
+    assert purge_items(settings, dry_run=True) == {"expired": 1, "purged": 0, "jobs_pruned": 1}
     assert client.get("/api/v1/items?trashed=true", headers=headers).json()["items"]
-    assert purge_items(settings) == {"expired": 1, "purged": 1}
-    assert purge_items(settings) == {"expired": 0, "purged": 0}
+    assert purge_items(settings) == {"expired": 1, "purged": 1, "jobs_pruned": 1}
+    assert purge_items(settings) == {"expired": 0, "purged": 0, "jobs_pruned": 0}
+    with connection(settings) as conn:
+        remaining = conn.execute("SELECT count(*) AS n FROM job").fetchone()
+        # The pruned job plus the purged item's own jobs are gone; the running one stays.
+        assert remaining == {"n": total["n"] - 1 - len(PROCESSORS)}
+        assert conn.execute(
+            "SELECT count(*) AS n FROM job WHERE status = 'running'"
+        ).fetchone() == {"n": 1}
     trash = client.get("/api/v1/items?trashed=true", headers=headers).json()["items"]
     assert [row["id"] for row in trash] == [second]
     assert client.post(f"/api/v1/items/{first}/restore", headers=headers).status_code == 404
@@ -100,7 +123,7 @@ def test_purge_respects_retention_and_removes_rows_not_objects(
     assert client.delete(f"/api/v1/items/{second}", headers=headers).status_code == 204
     monkeypatch.setattr("sys.argv", ["bag", "purge", "--retention-days", "0"])
     main()
-    assert json.loads(capsys.readouterr().out) == {"expired": 1, "purged": 1}
+    assert json.loads(capsys.readouterr().out) == {"expired": 1, "purged": 1, "jobs_pruned": 0}
     assert client.get("/api/v1/items?trashed=true", headers=headers).json()["items"] == []
     assert len(objects(settings.storage_path)) == 1
 

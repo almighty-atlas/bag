@@ -50,6 +50,24 @@ def purge_items(
                 (owner, retention),
             ).fetchall()
         ]
+    # Finished queue entries are history only; runs keep the visible state.
+    with connection(settings) as conn:
+        pruned = 0
+        for owner in _owners(conn, owner_id):
+            query = (
+                "SELECT count(*) AS n FROM job WHERE owner_id = %s "
+                "AND status IN ('succeeded', 'failed') AND updated_at <= now() - %s"
+            )
+            if not dry_run:
+                query = (
+                    "WITH gone AS (DELETE FROM job WHERE owner_id = %s "
+                    "AND status IN ('succeeded', 'failed') AND updated_at <= now() - %s "
+                    "RETURNING 1) SELECT count(*) AS n FROM gone"
+                )
+            row = conn.execute(
+                query, (owner, timedelta(days=settings.job_retention_days))
+            ).fetchone()
+            pruned += int(row["n"]) if row else 0
     purged = 0
     for owner, item_id in expired:
         if dry_run:
@@ -67,7 +85,7 @@ def purge_items(
                 conn.execute(statement, {"owner": owner, "item": item_id})
         purged += 1
         logger.info("item_purged", extra={"item_id": item_id, "owner_id": owner})
-    return {"expired": len(expired), "purged": purged}
+    return {"expired": len(expired), "purged": purged, "jobs_pruned": pruned}
 
 
 def _unreferenced(

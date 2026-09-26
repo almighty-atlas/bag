@@ -46,7 +46,9 @@ signs out existing sessions. `POST /api/v1/session` opens a server-side session
 cookie; cookie-authenticated unsafe requests and login must carry `X-Bag-Csrf: 1`.
 `GET /api/v1/session` reports the identity and `DELETE` signs out. Token
 management (`/api/v1/tokens`) requires a session, so bearer tokens cannot create
-or revoke tokens.
+or revoke tokens. An in-process sliding-window limiter answers 429 with
+`Retry-After` after `BAG_LOGIN_MAX_FAILURES` failed logins per username or client
+address within `BAG_LOGIN_WINDOW_SECONDS`; a successful login clears the count.
 
 Capture locks the owner row to serialize idempotency and duplicate checks. A unique
 owner/key constraint adds database enforcement. This trades per-owner throughput
@@ -128,7 +130,8 @@ clears it; both are idempotent and owner-scoped. Trashed items disappear from
 detail, download, processing and default listings but remain listable and
 searchable with `trashed=true`. Nothing is removed until `bag purge` hard-deletes
 items trashed longer than `BAG_TRASH_RETENTION_DAYS`, one owner-scoped transaction
-per item with children removed before the item. `bag gc` then removes storage
+per item with children removed before the item, and prunes finished `job` rows older
+than `BAG_JOB_RETENTION_DAYS` (runs, the visible state, stay). `bag gc` then removes storage
 objects no blob row references and crash-left `.upload-*` files: candidates are
 scanned without locks, and each deletion batch holds every owner's capture lock
 while re-checking references, so it waits for in-flight captures and can never
@@ -177,8 +180,10 @@ or S3 storage is not implemented. Duplicate objects are integrity-checked before
 Content signatures are detected with the pure-Python `filetype` library using a
 bounded prefix. Unknown formats use `application/octet-stream` at capture and may
 become `text/plain` after processing. No archive extraction or rendering happens.
-Downloads check SHA-256 and size before response, use the same verified file handle,
-force attachment/octet-stream and close it even on disconnect. Storage errors yield
+Downloads (`/content` for originals, `/snapshot` for fetched pages) check SHA-256 and
+size before response, use the same verified file handle, force attachment with
+`application/octet-stream`, `nosniff` and a CSP sandbox, and close it even on
+disconnect; fetched HTML is never rendered inline from the API origin. Storage errors yield
 a generic 503; neither original bytes nor filenames enter logs.
 
 Crashes may leave unpublished `.upload-*` files or published objects without a

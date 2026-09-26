@@ -1,6 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 
-import { ApiError, api, contentUrl, type ItemDetail, type ProcessingRun } from "./api";
+import { ApiError, api, contentUrl, snapshotUrl, type ItemDetail, type ProcessingRun } from "./api";
 
 export function ItemView({ id }: { id: string }) {
   const [item, setItem] = useState<ItemDetail | null>(null);
@@ -122,6 +122,11 @@ export function ItemView({ id }: { id: string }) {
           {item.source_url && (
             <a class="button" href={item.source_url} target="_blank" rel="noopener noreferrer nofollow">
               Link öffnen
+            </a>
+          )}
+          {item.kind === "url" && item.mime_type && (
+            <a class="button" href={snapshotUrl(id)} download>
+              Snapshot herunterladen
             </a>
           )}
           <button type="button" class="danger" onClick={() => void trash()}>

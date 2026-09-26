@@ -150,6 +150,7 @@ export const tokens = {
 };
 
 export const contentUrl = (id: string): string => `/api/v1/items/${encodeURIComponent(id)}/content`;
+export const snapshotUrl = (id: string): string => `/api/v1/items/${encodeURIComponent(id)}/snapshot`;
 
 /** Absolute http(s) URL on a single line: capture it as a link instead of text. */
 export const looksLikeUrl = (text: string): boolean =>
