@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 
-import { ApiError, api, looksLikeUrl, type ItemSummary, type SearchResult } from "./api";
-import { href, type Route } from "./app";
+import { ApiError, api, looksLikeUrl, organize, type ItemSummary, type NamedEntry } from "./api";
+import { EMPTY_FILTERS, href, type Filters, type Route } from "./app";
 
 type Row = ItemSummary & { snippet?: string };
 
@@ -13,6 +13,21 @@ const KIND_ICON: Record<string, string> = {
   file: "📦",
 };
 
+/** Query parameters for the API: dates become timezone-aware day boundaries. */
+export function filterParams(filters: Filters): Record<string, string> {
+  const params: Record<string, string> = {};
+  if (filters.kind) params["kind"] = filters.kind;
+  if (filters.tag) params["tag"] = filters.tag;
+  if (filters.collection) params["collection"] = filters.collection;
+  if (filters.from) params["from"] = new Date(`${filters.from}T00:00:00`).toISOString();
+  if (filters.to) {
+    const end = new Date(`${filters.to}T00:00:00`);
+    end.setDate(end.getDate() + 1);
+    params["to"] = end.toISOString();
+  }
+  return params;
+}
+
 export function describe(item: ItemSummary): string {
   return item.title ?? item.original_filename ?? item.source_url ?? item.user_note ?? item.kind;
 }
@@ -23,12 +38,14 @@ export function Feed({ route, prefill }: { route: Route & { name: "feed" }; pref
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState(route.query);
   const [loading, setLoading] = useState(false);
+  const [names, setNames] = useState<{ tags: NamedEntry[]; collections: NamedEntry[] }>({ tags: [], collections: [] });
+  const searchInput = useRef<HTMLInputElement>(null);
 
   const load = async (append: boolean) => {
     setLoading(true);
     setError(null);
     try {
-      const base: Record<string, string> = { limit: "20" };
+      const base: Record<string, string> = { limit: "20", ...filterParams(route.filters) };
       if (route.trashed) base["trashed"] = "true";
       if (route.query) {
         if (append && typeof next === "number") base["offset"] = String(next);
@@ -52,18 +69,42 @@ export function Feed({ route, prefill }: { route: Route & { name: "feed" }; pref
     setQuery(route.query);
     void load(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.query, route.trashed]);
+  }, [route.query, route.trashed, href(route)]);
+
+  useEffect(() => {
+    Promise.all([organize.list("tag"), organize.list("collection")])
+      .then(([tags, collections]) => setNames({ tags, collections }))
+      .catch(() => setNames({ tags: [], collections: [] }));
+    // "/" focuses the search box unless the user is already typing somewhere.
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (event.key === "/" && !["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName ?? "")) {
+        event.preventDefault();
+        searchInput.current?.focus();
+      }
+    };
+    addEventListener("keydown", onKey);
+    return () => removeEventListener("keydown", onKey);
+  }, []);
+
+  const go = (changes: Partial<Route & { name: "feed" }>) => {
+    location.hash = href({ ...route, ...changes });
+  };
 
   const submitSearch = (event: Event) => {
     event.preventDefault();
-    location.hash = href({ name: "feed", query: query.trim(), trashed: route.trashed });
+    go({ query: query.trim() });
   };
+
+  const setFilter = (key: keyof Filters, value: string) => go({ filters: { ...route.filters, [key]: value } });
+  const active = Object.values(route.filters).some(Boolean);
 
   return (
     <>
       {!route.trashed && <Capture onSaved={() => void load(false)} initial={prefill ?? ""} />}
       <form class="search" onSubmit={submitSearch} role="search">
         <input
+          ref={searchInput}
           type="search"
           placeholder={route.trashed ? "Im Papierkorb suchen…" : "Suchen… (Tasche OR \"local RAG\")"}
           value={query}
@@ -71,6 +112,42 @@ export function Feed({ route, prefill }: { route: Route & { name: "feed" }; pref
         />
         <button type="submit">Suchen</button>
       </form>
+      <div class="filters">
+        <select value={route.filters.kind} onChange={(e) => setFilter("kind", (e.target as HTMLSelectElement).value)}>
+          <option value="">alle Arten</option>
+          {["text", "url", "image", "document", "file"].map((kind) => (
+            <option value={kind} key={kind}>
+              {KIND_ICON[kind]} {kind}
+            </option>
+          ))}
+        </select>
+        <select value={route.filters.tag} onChange={(e) => setFilter("tag", (e.target as HTMLSelectElement).value)}>
+          <option value="">alle Tags</option>
+          {names.tags.map((tag) => (
+            <option value={tag.name} key={tag.id}>
+              {tag.name} ({tag.item_count})
+            </option>
+          ))}
+        </select>
+        <select
+          value={route.filters.collection}
+          onChange={(e) => setFilter("collection", (e.target as HTMLSelectElement).value)}
+        >
+          <option value="">alle Sammlungen</option>
+          {names.collections.map((collection) => (
+            <option value={collection.name} key={collection.id}>
+              {collection.name} ({collection.item_count})
+            </option>
+          ))}
+        </select>
+        <input type="date" value={route.filters.from} onChange={(e) => setFilter("from", (e.target as HTMLInputElement).value)} aria-label="ab" />
+        <input type="date" value={route.filters.to} onChange={(e) => setFilter("to", (e.target as HTMLInputElement).value)} aria-label="bis" />
+        {active && (
+          <button type="button" class="link" onClick={() => go({ filters: EMPTY_FILTERS })}>
+            Filter löschen
+          </button>
+        )}
+      </div>
       {error && <p class="error">{error}</p>}
       {rows.length === 0 && !loading && (
         <p class="hint">{route.trashed ? "Der Papierkorb ist leer." : "Noch nichts in der Tasche."}</p>
@@ -101,9 +178,14 @@ export function Feed({ route, prefill }: { route: Route & { name: "feed" }; pref
                   {new Date(row.captured_at).toLocaleString()} · {row.kind}
                   {row.processing_status !== "ready" && <> · {row.processing_status}</>}
                   {row.tags.map((tag) => (
-                    <span class="tag" key={tag}>
+                    <a
+                      class="tag"
+                      key={tag}
+                      href={href({ ...route, filters: { ...route.filters, tag } })}
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       {tag}
-                    </span>
+                    </a>
                   ))}
                 </span>
               </span>

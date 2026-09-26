@@ -7,7 +7,9 @@ packaged SQL migrations. `apps/web` is a Preact/Vite/TypeScript app (ADR-0017)
 that talks only to the API: login, feed with cursor paging, search with snippets,
 text/URL/file capture with the post-capture note, item detail with original
 download, editing of title, note, tags, collections and search language,
-processing state, reprocess, trash with restore, and client token management.
+processing state, reprocess, trash with restore, client token management, feed
+filters for kind, tag, collection and capture date (kept in the hash route), a
+tags-and-collections page with rename and delete, and `/` to focus search.
 A service worker caches only the shell and hashed assets (network first for
 navigations, never `/api`), and a GET share target at `/share` prefills capture
 with a shared URL or text. Pure routing and share-parsing helpers have vitest tests.

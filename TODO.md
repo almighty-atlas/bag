@@ -16,8 +16,7 @@ collections with filters, and `bag export`.
 
 ## Phase 3 — Web / PWA
 
-- [ ] Web: kind/date filters, tag and collection browsing pages, snapshot preview,
-      keyboard shortcut for capture.
+- [ ] Web: sandboxed snapshot preview of fetched pages.
 - [ ] PWA: POST share target with a service worker so shared files reach capture.
 
 ## Later phases

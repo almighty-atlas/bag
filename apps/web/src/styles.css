@@ -83,4 +83,8 @@ select { font: inherit; border-radius: 8px; border: 1px solid var(--border); pad
 .item-row .restore { position: absolute; right: 12px; top: 12px; font-size: 13px; padding: 4px 8px; }
 .item-row .restore + .item { padding-right: 150px; }
 .secret { user-select: all; overflow-wrap: anywhere; }
+.filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; font-size: 14px; }
+.filters select, .filters input { padding: 5px 8px; font-size: 14px; }
+a.tag { text-decoration: none; color: inherit; }
+a.tag:hover { border-color: var(--accent); }
 .login h1 { margin: 0 0 6px; font-size: 22px; }

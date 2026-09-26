@@ -4,13 +4,31 @@ import { ApiError, api, type Session } from "./api";
 import { Feed } from "./feed";
 import { ItemView } from "./item";
 import { Login } from "./login";
+import { Organize } from "./organize";
 import { Tokens } from "./tokens";
+
+export interface Filters {
+  kind: string;
+  tag: string;
+  collection: string;
+  from: string; // YYYY-MM-DD or empty
+  to: string;
+}
+
+export const EMPTY_FILTERS: Filters = { kind: "", tag: "", collection: "", from: "", to: "" };
 
 /** Hash routes keep the static build free of server-side rewrites. */
 export type Route =
-  | { name: "feed"; query: string; trashed: boolean }
+  | { name: "feed"; query: string; trashed: boolean; filters: Filters }
   | { name: "item"; id: string }
+  | { name: "organize" }
   | { name: "tokens" };
+
+export type FeedRoute = Extract<Route, { name: "feed" }>;
+
+export const FEED: FeedRoute = { name: "feed", query: "", trashed: false, filters: EMPTY_FILTERS };
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function parseRoute(hash: string): Route {
   const [path = "", search = ""] = hash.replace(/^#/, "").split("?");
@@ -18,7 +36,23 @@ export function parseRoute(hash: string): Route {
   const itemMatch = /^\/items\/([0-9a-f-]{36})$/.exec(path);
   if (itemMatch?.[1] !== undefined) return { name: "item", id: itemMatch[1] };
   if (path === "/tokens") return { name: "tokens" };
-  return { name: "feed", query: params.get("q") ?? "", trashed: params.get("trashed") === "1" };
+  if (path === "/organize") return { name: "organize" };
+  const date = (key: string) => {
+    const value = params.get(key) ?? "";
+    return DATE.test(value) ? value : "";
+  };
+  return {
+    name: "feed",
+    query: params.get("q") ?? "",
+    trashed: params.get("trashed") === "1",
+    filters: {
+      kind: params.get("kind") ?? "",
+      tag: params.get("tag") ?? "",
+      collection: params.get("collection") ?? "",
+      from: date("from"),
+      to: date("to"),
+    },
+  };
 }
 
 /** Text a share target handed over via /share?title=&text=&url=, or null. */
@@ -37,9 +71,13 @@ export function sharedText(pathname: string, search: string): string | null {
 export function href(route: Route): string {
   if (route.name === "item") return `#/items/${route.id}`;
   if (route.name === "tokens") return "#/tokens";
+  if (route.name === "organize") return "#/organize";
   const params = new URLSearchParams();
   if (route.query) params.set("q", route.query);
   if (route.trashed) params.set("trashed", "1");
+  for (const [key, value] of Object.entries(route.filters)) {
+    if (value) params.set(key, value);
+  }
   const query = params.toString();
   return query ? `#/?${query}` : "#/";
 }
@@ -84,8 +122,9 @@ export function App() {
           <span aria-hidden="true">👝</span> Bag of Holding
         </a>
         <nav>
-          <a href={href({ name: "feed", query: "", trashed: false })}>Feed</a>
-          <a href={href({ name: "feed", query: "", trashed: true })}>Papierkorb</a>
+          <a href={href(FEED)}>Feed</a>
+          <a href={href({ name: "organize" })}>Tags</a>
+          <a href={href({ ...FEED, trashed: true })}>Papierkorb</a>
           <a href={href({ name: "tokens" })}>Token</a>
           <button type="button" class="link" onClick={signOut}>
             Abmelden ({session.username ?? session.display_name})
@@ -95,6 +134,7 @@ export function App() {
       <main>
         {route.name === "item" && <ItemView id={route.id} />}
         {route.name === "tokens" && <Tokens />}
+        {route.name === "organize" && <Organize />}
         {route.name === "feed" && <Feed route={route} prefill={shared} />}
       </main>
     </>

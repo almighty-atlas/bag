@@ -149,6 +149,23 @@ export const tokens = {
   revoke: (id: string) => request<void>(`/api/v1/tokens/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };
 
+export interface NamedEntry {
+  id: string;
+  name: string;
+  created_at: string;
+  item_count: number;
+}
+
+export type NamedKind = "tag" | "collection";
+
+export const organize = {
+  list: (kind: NamedKind) => request<NamedEntry[]>(`/api/v1/${kind}s`),
+  rename: (kind: NamedKind, id: string, name: string) =>
+    request<NamedEntry>(`/api/v1/${kind}s/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ name }) }),
+  remove: (kind: NamedKind, id: string) =>
+    request<void>(`/api/v1/${kind}s/${encodeURIComponent(id)}`, { method: "DELETE" }),
+};
+
 export const contentUrl = (id: string): string => `/api/v1/items/${encodeURIComponent(id)}/content`;
 export const snapshotUrl = (id: string): string => `/api/v1/items/${encodeURIComponent(id)}/snapshot`;
 
