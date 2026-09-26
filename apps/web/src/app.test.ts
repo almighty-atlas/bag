@@ -14,6 +14,8 @@ describe("routes", () => {
       filters: { ...EMPTY_FILTERS, kind: "url", tag: "todo", from: "2026-09-01" },
     });
     expect(parseRoute("#/organize")).toEqual({ name: "organize" });
+    expect(parseRoute("#/share?text=hi&files=2")).toEqual({ name: "share", text: "hi", files: 2 });
+    expect(parseRoute("#/share?files=-3")).toEqual({ name: "share", text: "", files: 0 });
     expect(parseRoute("#/items/01a0de51-0fcc-7089-ae37-1a0e48153325")).toEqual({
       name: "item",
       id: "01a0de51-0fcc-7089-ae37-1a0e48153325",
@@ -30,6 +32,7 @@ describe("routes", () => {
       { name: "item", id: "01a0de51-0fcc-7089-ae37-1a0e48153325" } as const,
       { name: "organize" } as const,
       { name: "tokens" } as const,
+      { name: "share", text: "a&b", files: 1 } as const,
     ]) {
       expect(parseRoute(href(route))).toEqual(route);
     }
@@ -40,6 +43,16 @@ describe("routes", () => {
     expect(params["kind"]).toBe("text");
     expect(new Date(params["to"] ?? "").getTime() - new Date(params["from"] ?? "").getTime()).toBe(86_400_000);
     expect(filterParams(EMPTY_FILTERS)).toEqual({});
+  });
+});
+
+describe("snapshot preview", () => {
+  it("injects a no-network policy before the page's own head content", async () => {
+    const { sandboxedDocument } = await import("./item");
+    const doc = sandboxedDocument("<html><head><script src=x></script></head><body>hi</body></html>");
+    expect(doc.indexOf("Content-Security-Policy")).toBeLessThan(doc.indexOf("<script"));
+    expect(doc).toContain("default-src 'none'");
+    expect(sandboxedDocument("no head").startsWith("<meta http-equiv")).toBe(true);
   });
 });
 

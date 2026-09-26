@@ -86,5 +86,6 @@ select { font: inherit; border-radius: 8px; border: 1px solid var(--border); pad
 .filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; font-size: 14px; }
 .filters select, .filters input { padding: 5px 8px; font-size: 14px; }
 a.tag { text-decoration: none; color: inherit; }
+.preview { width: 100%; height: 60vh; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
 a.tag:hover { border-color: var(--accent); }
 .login h1 { margin: 0 0 6px; font-size: 22px; }

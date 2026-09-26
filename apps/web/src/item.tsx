@@ -2,6 +2,19 @@ import { useEffect, useState } from "preact/hooks";
 
 import { ApiError, api, contentUrl, snapshotUrl, type ItemDetail, type ProcessingRun } from "./api";
 
+/** Snapshot HTML with a policy that blocks every network load and script before the page's own head. */
+export function sandboxedDocument(html: string): string {
+  const policy =
+    '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:">';
+  const base = '<base target="_blank">';
+  const headMatch = /<head[^>]*>/i.exec(html);
+  if (headMatch) {
+    const at = headMatch.index + headMatch[0].length;
+    return html.slice(0, at) + policy + base + html.slice(at);
+  }
+  return policy + base + html;
+}
+
 export function ItemView({ id }: { id: string }) {
   const [item, setItem] = useState<ItemDetail | null>(null);
   const [runs, setRuns] = useState<ProcessingRun[]>([]);
@@ -12,6 +25,21 @@ export function ItemView({ id }: { id: string }) {
   const [collections, setCollections] = useState("");
   const [language, setLanguage] = useState("");
   const [saving, setSaving] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
+
+  const loadPreview = async () => {
+    if (preview !== null) {
+      setPreview(null);
+      return;
+    }
+    try {
+      const response = await fetch(snapshotUrl(id), { credentials: "same-origin" });
+      if (!response.ok) throw new Error(String(response.status));
+      setPreview(sandboxedDocument(await response.text()));
+    } catch {
+      setError("Snapshot konnte nicht geladen werden.");
+    }
+  };
 
   const load = async () => {
     try {
@@ -129,11 +157,23 @@ export function ItemView({ id }: { id: string }) {
               Snapshot herunterladen
             </a>
           )}
+          {item.kind === "url" && item.mime_type === "text/html" && (
+            <button type="button" onClick={() => void loadPreview()}>
+              {preview === null ? "Vorschau anzeigen" : "Vorschau schließen"}
+            </button>
+          )}
           <button type="button" class="danger" onClick={() => void trash()}>
             In den Papierkorb
           </button>
         </div>
       </form>
+      {preview !== null && (
+        <section class="card">
+          <h2>Snapshot (ohne Skripte, ohne Netzwerk)</h2>
+          {/* No allow-* flags: scripts, forms, same-origin access and navigation are all off. */}
+          <iframe class="preview" sandbox="" srcdoc={preview} title="Gespeicherte Seite" />
+        </section>
+      )}
       {item.content && item.kind === "text" && (
         <section class="card">
           <h2>Original</h2>

@@ -22,7 +22,8 @@ export type Route =
   | { name: "feed"; query: string; trashed: boolean; filters: Filters }
   | { name: "item"; id: string }
   | { name: "organize" }
-  | { name: "tokens" };
+  | { name: "tokens" }
+  | { name: "share"; text: string; files: number };
 
 export type FeedRoute = Extract<Route, { name: "feed" }>;
 
@@ -37,6 +38,10 @@ export function parseRoute(hash: string): Route {
   if (itemMatch?.[1] !== undefined) return { name: "item", id: itemMatch[1] };
   if (path === "/tokens") return { name: "tokens" };
   if (path === "/organize") return { name: "organize" };
+  if (path === "/share") {
+    const files = Number.parseInt(params.get("files") ?? "0", 10);
+    return { name: "share", text: params.get("text") ?? "", files: Number.isFinite(files) ? Math.max(files, 0) : 0 };
+  }
   const date = (key: string) => {
     const value = params.get(key) ?? "";
     return DATE.test(value) ? value : "";
@@ -72,6 +77,12 @@ export function href(route: Route): string {
   if (route.name === "item") return `#/items/${route.id}`;
   if (route.name === "tokens") return "#/tokens";
   if (route.name === "organize") return "#/organize";
+  if (route.name === "share") {
+    const params = new URLSearchParams();
+    if (route.text) params.set("text", route.text);
+    if (route.files) params.set("files", String(route.files));
+    return `#/share?${params}`;
+  }
   const params = new URLSearchParams();
   if (route.query) params.set("q", route.query);
   if (route.trashed) params.set("trashed", "1");
@@ -135,7 +146,8 @@ export function App() {
         {route.name === "item" && <ItemView id={route.id} />}
         {route.name === "tokens" && <Tokens />}
         {route.name === "organize" && <Organize />}
-        {route.name === "feed" && <Feed route={route} prefill={shared} />}
+        {route.name === "feed" && <Feed route={route} prefill={shared} sharedFiles={0} />}
+        {route.name === "share" && <Feed route={FEED} prefill={route.text || null} sharedFiles={route.files} />}
       </main>
     </>
   );

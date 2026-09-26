@@ -308,8 +308,10 @@ docker compose --env-file .env -f deploy/compose/compose.yaml up -d --build bag-
 
 The app installs as a PWA: a service worker caches the shell and hashed assets so
 the UI opens offline (API data is never cached), and on Android the installed app
-appears in the share sheet so a shared link or text lands in the capture box.
-Sharing files from the share sheet is not wired yet.
+appears in the share sheet. A shared link or text lands in the capture box; shared
+files are parked by the service worker and uploaded when you press "In die
+Tasche", so you can add a thought first. Fetched pages can be previewed inside the
+item view in a sandboxed frame that blocks scripts and every network request.
 
 For frontend development run `npm ci && npm run dev` in `apps/web` (Node 22); the
 dev server proxies `/api` to <http://127.0.0.1:8000>. With plain http on

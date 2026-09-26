@@ -11,8 +11,13 @@ processing state, reprocess, trash with restore, client token management, feed
 filters for kind, tag, collection and capture date (kept in the hash route), a
 tags-and-collections page with rename and delete, and `/` to focus search.
 A service worker caches only the shell and hashed assets (network first for
-navigations, never `/api`), and a GET share target at `/share` prefills capture
-with a shared URL or text. Pure routing and share-parsing helpers have vitest tests.
+navigations, never `/api`). The Web Share Target posts to `/share`: the worker
+stores shared files in a cache and redirects to `#/share`, where the app prefills
+text and uploads the parked files with the user's note through the normal capture
+call, then clears the cache. Fetched HTML snapshots can be previewed in an iframe
+with an empty `sandbox` attribute and an injected CSP (`default-src 'none'`), so
+no script runs and no request leaves the page. Pure routing, share-parsing and
+CSP-injection helpers have vitest tests.
 
 Compose starts PostgreSQL 17, `bag-api`, `bag-worker` and `bag-web`. API and worker
 share a non-root image built from locked uv dependencies; `bag-web` is an nginx

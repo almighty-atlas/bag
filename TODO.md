@@ -16,8 +16,8 @@ collections with filters, and `bag export`.
 
 ## Phase 3 — Web / PWA
 
-- [ ] Web: sandboxed snapshot preview of fetched pages.
-- [ ] PWA: POST share target with a service worker so shared files reach capture.
+- [ ] Web: browser-driven end-to-end test (Playwright) for the share-target and preview flows,
+      which curl cannot exercise.
 
 ## Later phases
 

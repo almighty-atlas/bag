@@ -32,7 +32,37 @@ export function describe(item: ItemSummary): string {
   return item.title ?? item.original_filename ?? item.source_url ?? item.user_note ?? item.kind;
 }
 
-export function Feed({ route, prefill }: { route: Route & { name: "feed" }; prefill: string | null }) {
+/** Files a POST share target stashed in the cache; uploaded once, then forgotten. */
+export async function uploadSharedFiles(note: string | null): Promise<number> {
+  if (!("caches" in globalThis)) return 0;
+  const cache = await caches.open("bag-share");
+  const countResponse = await cache.match("/shared/count");
+  const count = Number.parseInt((await countResponse?.text()) ?? "0", 10) || 0;
+  let uploaded = 0;
+  for (let index = 0; index < count; index += 1) {
+    const stored = await cache.match(`/shared/${index}`);
+    if (!stored) continue;
+    const name = decodeURIComponent(stored.headers.get("X-Bag-Filename") ?? "shared");
+    const file = new File([await stored.blob()], name, {
+      type: stored.headers.get("Content-Type") ?? "application/octet-stream",
+    });
+    await api.captureFile(file, note);
+    await cache.delete(`/shared/${index}`);
+    uploaded += 1;
+  }
+  await cache.delete("/shared/count");
+  return uploaded;
+}
+
+export function Feed({
+  route,
+  prefill,
+  sharedFiles,
+}: {
+  route: Route & { name: "feed" };
+  prefill: string | null;
+  sharedFiles: number;
+}) {
   const [rows, setRows] = useState<Row[]>([]);
   const [next, setNext] = useState<string | number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -101,7 +131,9 @@ export function Feed({ route, prefill }: { route: Route & { name: "feed" }; pref
 
   return (
     <>
-      {!route.trashed && <Capture onSaved={() => void load(false)} initial={prefill ?? ""} />}
+      {!route.trashed && (
+        <Capture onSaved={() => void load(false)} initial={prefill ?? ""} sharedFiles={sharedFiles} />
+      )}
       <form class="search" onSubmit={submitSearch} role="search">
         <input
           ref={searchInput}
@@ -202,8 +234,17 @@ export function Feed({ route, prefill }: { route: Route & { name: "feed" }; pref
   );
 }
 
-function Capture({ onSaved, initial }: { onSaved: () => void; initial: string }) {
+function Capture({
+  onSaved,
+  initial,
+  sharedFiles,
+}: {
+  onSaved: () => void;
+  initial: string;
+  sharedFiles: number;
+}) {
   const [text, setText] = useState(initial);
+  const [pendingShare, setPendingShare] = useState(sharedFiles);
   const [note, setNote] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -223,14 +264,23 @@ function Capture({ onSaved, initial }: { onSaved: () => void; initial: string })
   const save = async (event: Event) => {
     event.preventDefault();
     const content = text.trim();
-    if (!content) return;
+    if (!content && !pendingShare) return;
     setBusy(true);
     try {
       const userNote = note.trim() || null;
-      const result = looksLikeUrl(content)
-        ? await api.captureUrl(content, userNote)
-        : await api.captureText(text, userNote);
-      finish(result.duplicate_of);
+      let duplicate: string | null = null;
+      if (content) {
+        const result = looksLikeUrl(content)
+          ? await api.captureUrl(content, userNote)
+          : await api.captureText(text, userNote);
+        duplicate = result.duplicate_of;
+      }
+      if (pendingShare) {
+        await uploadSharedFiles(userNote);
+        setPendingShare(0);
+        history.replaceState(null, "", "/#/");
+      }
+      finish(duplicate);
     } catch (failure: unknown) {
       fail(failure);
     } finally {
@@ -283,10 +333,15 @@ function Capture({ onSaved, initial }: { onSaved: () => void; initial: string })
           onChange={(e) => void upload((e.target as HTMLInputElement).files)}
           aria-label="Dateien hochladen"
         />
-        <button type="submit" disabled={busy || !text.trim()}>
+        <button type="submit" disabled={busy || (!text.trim() && !pendingShare)}>
           In die Tasche
         </button>
       </div>
+      {pendingShare > 0 && (
+        <p class="hint">
+          {pendingShare} geteilte Datei(en) warten. Optional einen Gedanken ergänzen, dann „In die Tasche“.
+        </p>
+      )}
       {status && <p class="status" role="status">{status}</p>}
     </form>
   );
