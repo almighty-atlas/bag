@@ -25,8 +25,8 @@ collections with filters, and `bag export`.
 
 - [ ] Web: kind/date filters, tag and collection browsing pages, snapshot preview,
       keyboard shortcut for capture.
-- [ ] Web: frontend unit tests (vitest) and an end-to-end smoke in CI against the stack.
-- [ ] PWA: service worker for the offline shell and a share target for URLs/text/files.
+- [ ] Web: an end-to-end smoke in CI against the running stack (login, capture, search).
+- [ ] PWA: POST share target with a service worker so shared files reach capture.
 - [ ] Rate-limit login attempts per username and address.
 
 ## Later phases

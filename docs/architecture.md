@@ -8,6 +8,9 @@ that talks only to the API: login, feed with cursor paging, search with snippets
 text/URL/file capture with the post-capture note, item detail with original
 download, editing of title, note, tags, collections and search language,
 processing state, reprocess, trash with restore, and client token management.
+A service worker caches only the shell and hashed assets (network first for
+navigations, never `/api`), and a GET share target at `/share` prefills capture
+with a shared URL or text. Pure routing and share-parsing helpers have vitest tests.
 
 Compose starts PostgreSQL 17, `bag-api`, `bag-worker` and `bag-web`. API and worker
 share a non-root image built from locked uv dependencies; `bag-web` is an nginx

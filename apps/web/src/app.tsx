@@ -21,6 +21,20 @@ export function parseRoute(hash: string): Route {
   return { name: "feed", query: params.get("q") ?? "", trashed: params.get("trashed") === "1" };
 }
 
+/** Text a share target handed over via /share?title=&text=&url=, or null. */
+export function sharedText(pathname: string, search: string): string | null {
+  if (pathname !== "/share") return null;
+  const params = new URLSearchParams(search);
+  const url = params.get("url")?.trim();
+  const text = params.get("text")?.trim();
+  const title = params.get("title")?.trim();
+  // Android often puts the URL into "text"; a bare URL is captured as a link.
+  const parts = [url || (text && /^https?:\/\/\S+$/i.test(text) ? text : null)];
+  if (!parts[0]) parts.push(title, text);
+  const joined = parts.filter((part): part is string => Boolean(part)).join("\n");
+  return joined || null;
+}
+
 export function href(route: Route): string {
   if (route.name === "item") return `#/items/${route.id}`;
   if (route.name === "tokens") return "#/tokens";
@@ -34,6 +48,11 @@ export function href(route: Route): string {
 export function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
+  const [shared] = useState<string | null>(() => {
+    const text = sharedText(location.pathname, location.search);
+    if (text !== null) history.replaceState(null, "", "/#/");
+    return text;
+  });
 
   useEffect(() => {
     const onHash = () => setRoute(parseRoute(location.hash));
@@ -77,7 +96,7 @@ export function App() {
       <main>
         {route.name === "item" && <ItemView id={route.id} />}
         {route.name === "tokens" && <Tokens />}
-        {route.name === "feed" && <Feed route={route} />}
+        {route.name === "feed" && <Feed route={route} prefill={shared} />}
       </main>
     </>
   );

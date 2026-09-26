@@ -17,7 +17,7 @@ export function describe(item: ItemSummary): string {
   return item.title ?? item.original_filename ?? item.source_url ?? item.user_note ?? item.kind;
 }
 
-export function Feed({ route }: { route: Route & { name: "feed" } }) {
+export function Feed({ route, prefill }: { route: Route & { name: "feed" }; prefill: string | null }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [next, setNext] = useState<string | number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +61,7 @@ export function Feed({ route }: { route: Route & { name: "feed" } }) {
 
   return (
     <>
-      {!route.trashed && <Capture onSaved={() => void load(false)} />}
+      {!route.trashed && <Capture onSaved={() => void load(false)} initial={prefill ?? ""} />}
       <form class="search" onSubmit={submitSearch} role="search">
         <input
           type="search"
@@ -120,8 +120,8 @@ export function Feed({ route }: { route: Route & { name: "feed" } }) {
   );
 }
 
-function Capture({ onSaved }: { onSaved: () => void }) {
-  const [text, setText] = useState("");
+function Capture({ onSaved, initial }: { onSaved: () => void; initial: string }) {
+  const [text, setText] = useState(initial);
   const [note, setNote] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

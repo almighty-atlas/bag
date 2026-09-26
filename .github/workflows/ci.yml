@@ -35,6 +35,8 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci --no-audit --no-fund
         working-directory: apps/web
+      - run: npm test
+        working-directory: apps/web
       - run: npm run build
         working-directory: apps/web
       - run: docker build -f deploy/compose/Dockerfile.web -t bag-web:ci .
