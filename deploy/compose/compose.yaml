@@ -8,11 +8,15 @@ x-app: &app
     BAG_DATABASE_URL: postgresql://${POSTGRES_USER:-bag}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-bag}
     BAG_USER_NAME: ${BAG_USER_NAME:-My Bag}
     BAG_MAX_REQUEST_BYTES: ${BAG_MAX_REQUEST_BYTES:-1048576}
+    BAG_MAX_UPLOAD_BYTES: ${BAG_MAX_UPLOAD_BYTES:-52428800}
+    BAG_STORAGE_PATH: /data/storage
     BAG_WORKER_PORT: ${BAG_WORKER_PORT:-8001}
   depends_on:
     postgres:
       condition: service_healthy
   restart: unless-stopped
+  volumes:
+    - bag-storage:/data/storage
 
 services:
   postgres:
@@ -22,7 +26,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-bag}
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${BAG_POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -51,3 +55,4 @@ services:
 
 volumes:
   postgres-data:
+  bag-storage:

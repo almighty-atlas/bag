@@ -5,17 +5,15 @@ from uuid import UUID
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 
-class TextCapture(BaseModel):
+class CaptureMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    content: str = Field(min_length=1)
-    kind: Literal["text"] = "text"
     source: str = Field(default="api", min_length=1, max_length=100)
     user_note: str | None = None
     captured_at: AwareDatetime | None = None
     client_capture_id: UUID | None = None
 
-    @field_validator("content", "user_note", "source")
+    @field_validator("user_note", "source")
     @classmethod
     def postgres_text(cls, value: str | None) -> str | None:
         if value is not None:
@@ -23,6 +21,21 @@ class TextCapture(BaseModel):
                 raise ValueError("NUL characters cannot be stored as PostgreSQL text")
             value.encode("utf-8")
         return value
+
+
+class TextCapture(CaptureMetadata):
+    content: str = Field(min_length=1)
+    kind: Literal["text"] = "text"
+
+    @field_validator("content")
+    @classmethod
+    def valid_content(cls, value: str) -> str:
+        cls.postgres_text(value)
+        return value
+
+
+class FileCapture(CaptureMetadata):
+    kind: Literal["file"] = "file"
 
 
 class CaptureResponse(BaseModel):
@@ -39,6 +52,7 @@ class ItemResponse(BaseModel):
     content: str | None
     user_note: str | None
     mime_type: str | None
+    original_filename: str | None
     content_hash: str | None
     processing_status: str
     created_at: datetime

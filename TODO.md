@@ -2,21 +2,16 @@
 
 Actionable outstanding work only. Keep items concrete; move vague ideas to `docs/spec.md` or drop them.
 
-Phase 0 and the first text-capture slice are implemented. Phase 1 is not complete.
+Phase 0, text capture and filesystem file capture/download are implemented.
+Phase 1 is not complete.
 
 ## Phase 1 — Remaining capture backend
 
-- [ ] Implement content-addressed filesystem storage with atomic writes, file/directory
-      fsync, integrity checks and an abstraction for a later S3 backend.
-- [ ] Add multipart file capture with streaming limits, content-based MIME detection,
-      untrusted display filenames and original download as an attachment.
 - [ ] Add URL capture preserving input without fetching on the capture path.
-- [ ] Extend idempotency and duplicate detection to file/URL capture; test concurrent
-      uploads and crashes between blob persistence and database commit.
-- [ ] Add the `bag-storage` volume and document backup/restore of database plus blobs.
+- [ ] Extend shared capture idempotency/duplicate semantics to URL input.
 - [ ] Add administrative token creation/revocation and explicit lost-token recovery
       without replacing the user or invalidating existing tokens.
-- [ ] Verify file, URL and text originals survive full Compose restarts.
+- [ ] Verify URL originals survive full Compose restarts alongside text/files.
 
 ## Phase 2 — After capture is stable
 
@@ -28,6 +23,8 @@ Phase 0 and the first text-capture slice are implemented. Phase 1 is not complet
       redirect revalidation and size/time limits before enabling fetch jobs.
 - [ ] Add multilingual search and item-list/filter APIs using the generated vector.
 - [ ] Add soft delete, restore, explicit purge and reference-safe storage garbage collection.
+- [ ] Reclaim crash-left `.upload-*` files and unreferenced published objects through
+      an explicit job coordinated with active captures; never delete another owner's references.
 - [ ] Implement export of originals and JSONL metadata through the API.
 
 ## Later phases

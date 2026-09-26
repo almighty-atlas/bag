@@ -6,6 +6,8 @@ requires-python = ">=3.12"
 dependencies = [
   "alembic>=1.16,<2",
   "fastapi>=0.115,<1",
+  "filetype>=1.2,<2",
+  "python-multipart>=0.0.20,<1",
   "psycopg[binary]>=3.2,<4",
   "pydantic-settings>=2.8,<3",
   "uvicorn>=0.34,<1",
@@ -35,6 +37,10 @@ select = ["E", "F", "I", "UP", "B"]
 strict = true
 plugins = ["pydantic.mypy"]
 files = ["apps/api/src", "tests"]
+
+[[tool.mypy.overrides]]
+module = "filetype.*"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

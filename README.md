@@ -2,9 +2,9 @@
 
 > A self-hosted, capture-first personal memory system. Drop anything in. Organize later. Retrieve by meaning.
 
-**Status:** foundation and first text-capture slice implemented. Bearer authentication,
-durable text storage, idempotent retries and duplicate relations work. File/URL capture,
-processing, search and clients remain pending. The worker exposes health/readiness;
+**Status:** text and file capture implemented. Bearer authentication, durable original
+storage, authenticated file downloads, idempotent retries and duplicate relations work.
+URL capture, processing, search and clients remain pending. The worker exposes health/readiness;
 it does not execute jobs yet.
 
 ## What it is
@@ -69,6 +69,58 @@ API docs: <http://localhost:8000/docs>; OpenAPI: <http://localhost:8000/openapi.
 `/health` checks liveness; `/ready` checks PostgreSQL and the expected schema revision.
 Both API and worker expose these endpoints.
 
+## Try file capture
+
+Existing installations can update without replacing `.env` or the token:
+
+```sh
+docker compose --env-file .env -f deploy/compose/compose.yaml build
+docker compose --env-file .env -f deploy/compose/compose.yaml up -d
+```
+
+No new database migration is needed for this slice. Compose creates a persistent
+`bag-storage` volume automatically. New environment options have defaults, so an
+existing `.env` continues to work. In <http://localhost:8000/docs>, authorize with
+your token, open `POST /api/v1/capture/file`, choose **Try it out**, select a file
+and leave `metadata` as `{}`. Execute, then use the returned ID in
+`GET /api/v1/items/{item_id}/content` to download the original.
+
+The multipart fields are `file` and optional `metadata` (a JSON string):
+
+```sh
+read -r -s BAG_TOKEN
+export BAG_TOKEN
+CAPTURE_ID=$(python3 -c 'import uuid; print(uuid.uuid4())')
+curl --fail-with-body -sS http://localhost:8000/api/v1/capture/file \
+  -H "Authorization: Bearer $BAG_TOKEN" \
+  -H "Idempotency-Key: $CAPTURE_ID" \
+  -F 'file=@/path/to/document.pdf' \
+  -F 'metadata={"user_note":"For later","source":"api"}'
+# Replace ITEM_ID with the returned ID and choose a new output filename.
+curl --fail-with-body http://localhost:8000/api/v1/items/ITEM_ID/content \
+  -H "Authorization: Bearer $BAG_TOKEN" --output downloaded-original.pdf
+unset BAG_TOKEN
+```
+
+Files are limited to 50 MiB by default (`BAG_MAX_UPLOAD_BYTES`); empty files are
+allowed. Metadata supports the same note, source, capture time and retry key as text.
+File signatures determine the stored MIME type; unrecognized formats safely fall
+back to `application/octet-stream`. The client MIME and filename extension are ignored.
+Downloads always use an attachment with `nosniff`, even for recognized images or HTML.
+
+Files with equal bytes share physical storage, while separate captures keep their
+own notes and filenames. Keys are shared across text/file routes: a reused key
+returns the original capture. Text items still expose originals in their JSON
+`content`; the download endpoint currently serves file blobs only.
+
+To verify persistence, capture a file, run the following, then download the same
+ID and compare it to the original with `cmp original.pdf downloaded-original.pdf`:
+
+```sh
+docker compose --env-file .env -f deploy/compose/compose.yaml restart postgres bag-api bag-worker
+docker compose --env-file .env -f deploy/compose/compose.yaml up -d --wait
+```
+
 ## Development and checks
 
 Install Python 3.12+ and uv:
@@ -112,17 +164,24 @@ credentials in URLs). API and database ports bind to loopback. Remote access nee
 a TLS reverse proxy with request size/time limits. No telemetry or external content
 services are used.
 
-Data lives in the `bag_postgres-data` volume. All current originals are PostgreSQL
-text; a blob-storage volume will be added with file capture. Back up using a dump
-and keep `.env` separately and securely:
+Data lives in `bag_postgres-data` (database/text) and `bag_bag-storage` (original
+files). Custom Compose project names change these volume prefixes. Stop API and
+worker writes during backup and copy **both** the dump and storage archive. Keep
+`.env` separately and securely. Use new backup filenames for each snapshot:
 
 ```sh
+docker compose --env-file .env -f deploy/compose/compose.yaml stop bag-api bag-worker
 docker compose --env-file .env -f deploy/compose/compose.yaml exec -T postgres \
   sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > bag.dump
+docker compose --env-file .env -f deploy/compose/compose.yaml run --rm --no-deps -T bag-api \
+  tar -C /data/storage -cf - . > bag-storage.tar
+docker compose --env-file .env -f deploy/compose/compose.yaml up -d bag-api bag-worker
 ```
 
-Restore into an empty replacement database with `pg_restore` and verify it before
-switching services. `docker compose down` preserves data; `down -v` destroys volumes.
+Restore into an empty replacement database with `pg_restore`, and extract the matching
+archive into an empty replacement storage volume, owned by UID 10001. Preserve paths
+and bytes; verify downloads before switching services. Neither component alone is a
+complete backup. `docker compose down` preserves data; `down -v` destroys volumes.
 For updates: back up, build, explicitly run `bag migrate`, then recreate API/worker
 with the quickstart commands. Retain the token across restarts; token recovery and
 management are not implemented yet.

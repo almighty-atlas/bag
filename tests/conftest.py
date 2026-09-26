@@ -1,5 +1,6 @@
 import os
 from collections.abc import Iterator
+from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
@@ -13,7 +14,7 @@ from pydantic import SecretStr
 
 
 @pytest.fixture
-def settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[Settings]:
+def settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Settings]:
     url = os.getenv("BAG_TEST_DATABASE_URL")
     if not url:
         pytest.skip("Set BAG_TEST_DATABASE_URL to a disposable PostgreSQL 17 database")
@@ -21,7 +22,7 @@ def settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[Settings]:
         pytest.fail("Test database name must end in _test; tests clear its Bag tables")
     monkeypatch.setenv("BAG_DATABASE_URL", url)
     command.upgrade(migration_config(), "head")
-    value = Settings(database_url=SecretStr(url))
+    value = Settings(database_url=SecretStr(url), storage_path=tmp_path / "storage")
     with connection(value) as conn:
         conn.execute('TRUNCATE TABLE "user" CASCADE')
     yield value

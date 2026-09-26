@@ -1,19 +1,49 @@
 import hashlib
 import logging
+from typing import BinaryIO
 from uuid import UUID
 
+import filetype
 from fastapi import HTTPException
 
 from bag.config import Settings
 from bag.db import Row, connection
 from bag.ids import uuid7
-from bag.schemas import CaptureResponse, ItemResponse, TextCapture
+from bag.schemas import CaptureResponse, FileCapture, ItemResponse, TextCapture
+from bag.storage import BlobStorage, StoredBlob
 
 logger = logging.getLogger("bag.capture")
 
 
 def capture_text(settings: Settings, owner_id: UUID, payload: TextCapture) -> CaptureResponse:
-    digest = hashlib.sha256(payload.content.encode("utf-8")).hexdigest()
+    return _capture(settings, owner_id, payload)
+
+
+def capture_file(
+    settings: Settings,
+    owner_id: UUID,
+    payload: FileCapture,
+    source: BinaryIO,
+    filename: str,
+    storage: BlobStorage,
+) -> CaptureResponse:
+    if len(filename) > 1024:
+        raise HTTPException(422, "Filename too long")
+    try:
+        FileCapture.postgres_text(filename)
+    except ValueError as exc:
+        raise HTTPException(422, "Invalid filename") from exc
+    return _capture(settings, owner_id, payload, source, filename, storage)
+
+
+def _capture(
+    settings: Settings,
+    owner_id: UUID,
+    payload: TextCapture | FileCapture,
+    source: BinaryIO | None = None,
+    filename: str | None = None,
+    storage: BlobStorage | None = None,
+) -> CaptureResponse:
     with connection(settings) as conn:
         # Serializing captures per owner makes both replay and duplicate detection atomic.
         conn.execute('SELECT id FROM "user" WHERE id = %s FOR UPDATE', (owner_id,))
@@ -37,6 +67,23 @@ def capture_text(settings: Settings, owner_id: UUID, payload: TextCapture) -> Ca
                 duplicate_of=relation["target_item_id"] if relation else None,
             )
         else:
+            blob: StoredBlob | None = None
+            if isinstance(payload, TextCapture):
+                content: str | None = payload.content
+                digest = hashlib.sha256(payload.content.encode("utf-8")).hexdigest()
+                mime_type = "text/plain"
+                kind = "text"
+            else:
+                assert source is not None and storage is not None
+                sample = source.read(8192)
+                source.seek(0)
+                mime_type = filetype.guess_mime(sample) or "application/octet-stream"
+                kind = "image" if mime_type.startswith("image/") else "file"
+                if mime_type == "application/pdf":
+                    kind = "document"
+                blob = storage.put(source, settings.max_upload_bytes)
+                digest = blob.sha256
+                content = None
             duplicate = conn.execute(
                 "SELECT id FROM item WHERE owner_id = %s AND content_hash = %s "
                 "AND deleted_at IS NULL ORDER BY created_at, id LIMIT 1",
@@ -45,20 +92,38 @@ def capture_text(settings: Settings, owner_id: UUID, payload: TextCapture) -> Ca
             item_id = uuid7()
             conn.execute(
                 "INSERT INTO item (id, owner_id, client_capture_id, kind, source, "
-                "content, user_note, content_hash, mime_type, processing_status, captured_at) "
-                "VALUES (%s, %s, %s, 'text', %s, %s, %s, %s, 'text/plain', 'ready', "
+                "content, user_note, content_hash, mime_type, original_filename, "
+                "processing_status, captured_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ready', "
                 "coalesce(%s, now()))",
                 (
                     item_id,
                     owner_id,
                     payload.client_capture_id,
+                    kind,
                     payload.source,
-                    payload.content,
+                    content,
                     payload.user_note,
                     digest,
+                    mime_type,
+                    filename,
                     payload.captured_at,
                 ),
             )
+            if blob is not None:
+                conn.execute(
+                    "INSERT INTO blob (id, owner_id, item_id, role, storage_key, sha256, "
+                    "size_bytes, mime_type) VALUES (%s, %s, %s, 'original', %s, %s, %s, %s)",
+                    (
+                        uuid7(),
+                        owner_id,
+                        item_id,
+                        blob.storage_key,
+                        blob.sha256,
+                        blob.size_bytes,
+                        mime_type,
+                    ),
+                )
             duplicate_id = duplicate["id"] if duplicate else None
             if duplicate_id is not None:
                 conn.execute(
@@ -86,7 +151,8 @@ def capture_text(settings: Settings, owner_id: UUID, payload: TextCapture) -> Ca
 def get_item(settings: Settings, owner_id: UUID, item_id: UUID) -> ItemResponse:
     with connection(settings) as conn:
         row = conn.execute(
-            "SELECT id, kind, source, content, user_note, mime_type, content_hash, "
+            "SELECT id, kind, source, content, user_note, mime_type, original_filename, "
+            "content_hash, "
             "processing_status, created_at, captured_at, updated_at FROM item "
             "WHERE owner_id = %s AND id = %s AND deleted_at IS NULL",
             (owner_id, item_id),

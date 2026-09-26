@@ -5,6 +5,7 @@ COPY pyproject.toml uv.lock ./
 COPY apps/api apps/api
 RUN uv sync --frozen --no-dev --no-editable
 RUN useradd --system --uid 10001 bag
+RUN mkdir -p /data/storage && chown bag /data/storage
 USER bag
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
