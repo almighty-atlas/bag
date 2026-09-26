@@ -82,8 +82,9 @@ Temporary upload paths never depend on the original filename.
 
 Storage/commit failures cannot acknowledge a new capture. A failure after publication
 may leave an unreferenced durable object; retry reuses it. Removing it immediately
-would race other owners' captures, so orphan cleanup is deferred to explicit future
-jobs. Hard crashes can also leave `.upload-*` files. Both are part of future GC work.
+would race other owners' captures, so orphans and crash-left `.upload-*` files are
+only removed by the explicit `bag gc` command, which waits for the owner capture
+locks and re-checks blob references before unlinking.
 
 `GET /api/v1/items/{id}/content` scopes item and blob by owner, excludes trash and
 checks the complete object's size and SHA-256 before sending any bytes. It returns

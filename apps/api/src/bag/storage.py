@@ -58,9 +58,48 @@ def chunks(source: BinaryIO) -> Iterator[bytes]:
         yield data
 
 
+@dataclass(frozen=True)
+class StoredObject:
+    storage_key: str | None  # None for an unpublished .upload-* temporary
+    path: Path
+    size_bytes: int
+    modified_at: float
+
+
 class FileSystemStorage:
     def __init__(self, root: Path) -> None:
         self.root = root.absolute()
+
+    def scan(self) -> Iterator[StoredObject]:
+        """Published objects and leftover temporaries; ignores anything else."""
+        if not self.root.is_dir():
+            return
+        for entry in self.root.iterdir():
+            if entry.name.startswith(".upload-") and entry.is_file():
+                stat = entry.stat()
+                yield StoredObject(None, entry, stat.st_size, stat.st_mtime)
+        for candidate in self.root.glob("[0-9a-f][0-9a-f]/[0-9a-f][0-9a-f]/*"):
+            key = candidate.relative_to(self.root).as_posix()
+            try:
+                if storage_key(candidate.name) != key or not candidate.is_file():
+                    continue
+            except StorageError:
+                continue
+            stat = candidate.stat()
+            yield StoredObject(key, candidate, stat.st_size, stat.st_mtime)
+
+    def remove(self, obj: StoredObject) -> None:
+        if obj.storage_key is not None:
+            expected = obj.path == self.root / obj.storage_key
+        else:
+            expected = obj.path.parent == self.root and obj.path.name.startswith(".upload-")
+        if not expected:
+            raise StorageError("Refusing to remove a path outside the storage layout")
+        try:
+            obj.path.unlink(missing_ok=True)
+            sync_directory(obj.path.parent)
+        except OSError as exc:
+            raise StorageError("Storage unavailable") from exc
 
     def put(self, source: BinaryIO, limit: int) -> StoredBlob:
         temporary: Path | None = None

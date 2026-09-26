@@ -7,7 +7,8 @@ and server-side token creation, listing, revocation and lost-token recovery are 
 Phase 2 has a leased PostgreSQL job queue, a worker with bounded retries and recovery,
 `mime_detect`/`text_extract`/`language` processors, a derived item status,
 reprocessing through the API and `bag reprocess`, list/search endpoints with
-filters, ranking and snippets, and idempotent trash/restore.
+filters, ranking and snippets, idempotent trash/restore, and explicit `bag purge`
+and `bag gc` maintenance commands.
 
 ## Phase 2 — Processing and search
 
@@ -19,12 +20,8 @@ filters, ranking and snippets, and idempotent trash/restore.
       write `metadata.language.user = true` so detection never overwrites it.
 - [ ] Add tag and collection APIs and the corresponding `tag`/`collection` filters
       on list and search.
-- [ ] Add explicit purge of trashed items after a configurable retention (default 30 days)
-      and reference-safe storage garbage collection; purge must remove jobs, runs,
-      relations, tags and collections before items.
-- [ ] Reclaim crash-left `.upload-*` files and unreferenced published objects through
-      an explicit job coordinated with active captures; never delete another owner's references.
-- [ ] Prune completed `job` rows after a retention period once purge exists.
+- [ ] Prune completed `job` rows after a retention period.
+- [ ] Decide whether the worker should run `purge`/`gc` on a schedule or leave it to cron.
 - [ ] Implement export of originals and JSONL metadata through the API.
 
 ## Later phases

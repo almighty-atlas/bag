@@ -108,9 +108,12 @@ Deletion is soft: `DELETE` sets `deleted_at` (kept on repeats), restore clears i
 and both bump `updated_at` only when the state changes. Detail routes hide rows
 with `deleted_at` set; listings and search expose them with `trashed=true`. The
 worker still processes jobs of trashed items, replays still resolve them, and
-duplicate detection ignores them. Foreign keys do not cascade deletion: a future
-explicit purge must remove jobs, runs and references in order and collect shared
-storage only after the last live or trashed reference is gone.
+duplicate detection ignores them. Foreign keys do not cascade deletion: `bag purge`
+removes jobs, runs, relations (either direction), tag and collection assignments
+and blob rows before the item, after the retention period. Purged items are gone
+for good, including their capture keys, so a later replay of that key creates a
+new item. Physical objects outlive blob rows until `bag gc` finds no reference in
+any owner's blob rows.
 
 `bag migrate` runs packaged migration assets, including in installed wheels.
 Downgrades drop tables and are destructive; use only on disposable test databases.

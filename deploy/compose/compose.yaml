@@ -15,6 +15,7 @@ x-app: &app
     BAG_JOB_LEASE_SECONDS: ${BAG_JOB_LEASE_SECONDS:-300}
     BAG_JOB_MAX_ATTEMPTS: ${BAG_JOB_MAX_ATTEMPTS:-5}
     BAG_JOB_RETRY_SECONDS: ${BAG_JOB_RETRY_SECONDS:-5.0}
+    BAG_TRASH_RETENTION_DAYS: ${BAG_TRASH_RETENTION_DAYS:-30}
   depends_on:
     postgres:
       condition: service_healthy

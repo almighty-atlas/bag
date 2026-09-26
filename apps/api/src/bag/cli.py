@@ -3,6 +3,7 @@ import json
 import secrets
 import threading
 from dataclasses import asdict
+from datetime import timedelta
 from pathlib import Path
 from uuid import UUID
 
@@ -17,7 +18,8 @@ from bag.config import Settings
 from bag.db import connection
 from bag.ids import uuid7
 from bag.jobs import Scope, reprocess
-from bag.storage import FileSystemStorage
+from bag.maintenance import collect_garbage, purge_items
+from bag.storage import FileSystemStorage, StorageError
 from bag.tokens import TokenAdminError, create_token, list_tokens, resolve_owner, revoke_token
 from bag.worker import Worker
 
@@ -92,8 +94,43 @@ def main() -> None:
         default="missing",
         help="Processors without a run (default), failed runs, or every processor",
     )
+    purge_parser = commands.add_parser("purge", help="Hard-delete expired trashed items")
+    purge_parser.add_argument("--owner", type=UUID, help="Limit to one owner")
+    purge_parser.add_argument(
+        "--retention-days", type=int, help="Override BAG_TRASH_RETENTION_DAYS"
+    )
+    purge_parser.add_argument("--dry-run", action="store_true")
+    gc_parser = commands.add_parser("gc", help="Remove unreferenced storage objects")
+    gc_parser.add_argument("--min-age-hours", type=float, default=1.0)
+    gc_parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    if args.command == "reprocess":
+    if args.command in ("purge", "gc"):
+        try:
+            settings = Settings()
+            if args.command == "purge":
+                if args.retention_days is not None and args.retention_days < 0:
+                    parser.exit(1, "Retention must not be negative.\n")
+                retention = (
+                    None if args.retention_days is None else timedelta(days=args.retention_days)
+                )
+                result = purge_items(
+                    settings, retention=retention, owner_id=args.owner, dry_run=args.dry_run
+                )
+            else:
+                if args.min_age_hours < 0:
+                    parser.exit(1, "Minimum age must not be negative.\n")
+                result = collect_garbage(
+                    settings,
+                    FileSystemStorage(settings.storage_path),
+                    min_age=timedelta(hours=args.min_age_hours),
+                    dry_run=args.dry_run,
+                )
+            print(json.dumps(result))
+        except StorageError:
+            parser.exit(1, "Storage operation failed; rerun after checking the volume.\n")
+        except psycopg.Error:
+            parser.exit(1, "Database operation failed; maintenance stopped.\n")
+    elif args.command == "reprocess":
         try:
             print(json.dumps(reprocess_items(Settings(), args.scope, args.owner)))
         except TokenAdminError as exc:

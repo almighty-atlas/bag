@@ -166,8 +166,21 @@ curl --fail-with-body -sS -X POST "http://localhost:8000/api/v1/items/$ITEM_ID/r
   -H "Authorization: Bearer $BAG_TOKEN"
 ```
 
-Permanent removal with a retention period and storage cleanup is not implemented
-yet; trashed items keep their space until then.
+Permanent removal is a separate, explicit server command. `bag purge` deletes items
+that have been in the trash longer than `BAG_TRASH_RETENTION_DAYS` (default 30);
+`bag gc` afterwards removes stored files no item references any more, plus
+temporary files left by crashes. Preview both with `--dry-run`. Neither runs
+automatically; schedule them with cron or run them after a cleanup:
+
+```sh
+docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api bag purge --dry-run
+docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api bag purge
+docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api bag gc
+```
+
+`bag gc` briefly pauses captures while it deletes a batch and skips files younger
+than one hour (`--min-age-hours`). Purged items cannot be restored; take a backup
+first if in doubt.
 
 ## Try URL capture
 

@@ -92,8 +92,14 @@ runs or everything.
 `DELETE /api/v1/items/{id}` sets `deleted_at` and `POST /api/v1/items/{id}/restore`
 clears it; both are idempotent and owner-scoped. Trashed items disappear from
 detail, download, processing and default listings but remain listable and
-searchable with `trashed=true`. Nothing is removed from PostgreSQL or storage;
-purge and garbage collection are pending explicit jobs.
+searchable with `trashed=true`. Nothing is removed until `bag purge` hard-deletes
+items trashed longer than `BAG_TRASH_RETENTION_DAYS`, one owner-scoped transaction
+per item with children removed before the item. `bag gc` then removes storage
+objects no blob row references and crash-left `.upload-*` files: candidates are
+scanned without locks, and each deletion batch holds every owner's capture lock
+while re-checking references, so it waits for in-flight captures and can never
+remove an object a capture is publishing. Both are explicit commands, not
+scheduled background jobs.
 
 ## Listing and search
 
@@ -136,9 +142,9 @@ force attachment/octet-stream and close it even on disconnect. Storage errors yi
 a generic 503; neither original bytes nor filenames enter logs.
 
 Crashes may leave unpublished `.upload-*` files or published objects without a
-database reference. They are deliberately retained: cleanup/garbage collection is
-future explicit background work and must not race a capture. Retry can reuse a
-published object. Never manually remove objects just because one request failed.
+database reference. They are retained until `bag gc` removes them under the
+capture locks; retry can reuse a published object in the meantime. Never manually
+remove objects just because one request failed.
 
 Foundational domain tables without HTTP APIs are reserved for later slices.
 README documents exact startup, update and backup commands.

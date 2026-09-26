@@ -17,3 +17,4 @@ class Settings(BaseSettings):
     job_lease_seconds: int = Field(default=300, ge=1, le=86_400)
     job_max_attempts: int = Field(default=5, ge=1, le=100)
     job_retry_seconds: float = Field(default=5.0, ge=0, le=3600)
+    trash_retention_days: int = Field(default=30, ge=0, le=36_500)
