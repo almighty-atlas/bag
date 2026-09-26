@@ -78,7 +78,12 @@ and processor IDs and the attempt number, never content or error details.
 
 `GET /api/v1/items/{id}/processing` lists runs with status, attempts, last error and
 timing for owned, live items. `GET /api/v1/items/{id}` includes `extracted_text`.
-Reprocessing and item listing are not implemented.
+`POST /api/v1/items/{id}/reprocess` resets the runs of every registered processor
+and enqueues jobs, skipping processors with a queued or running job; a partial unique
+index guarantees one active job per item and processor. `bag reprocess` does the same
+for all live items of an owner, by default only for processors without a run (items
+from before the queue existed or newly registered processors), optionally for failed
+runs or everything. Item listing is not implemented.
 
 `/health` needs no database; `/ready` requires the expected migration revision.
 FastAPI generates OpenAPI. Application logs are JSON with fixed event names and

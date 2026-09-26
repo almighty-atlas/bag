@@ -14,7 +14,14 @@ from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from bag.auth import Identity, authenticate
-from bag.capture import capture_file, capture_text, capture_url, get_item, get_processing
+from bag.capture import (
+    capture_file,
+    capture_text,
+    capture_url,
+    get_item,
+    get_processing,
+    reprocess_item,
+)
 from bag.config import Settings
 from bag.db import ready
 from bag.download import download
@@ -167,6 +174,16 @@ def create_app(
         item_id: UUID, actor: Annotated[Identity, Depends(identity)]
     ) -> list[ProcessingRunResponse]:
         return get_processing(settings, actor.owner_id, item_id)
+
+    @app.post(
+        "/api/v1/items/{item_id}/reprocess",
+        response_model=list[ProcessingRunResponse],
+        status_code=202,
+    )
+    def reprocess(
+        item_id: UUID, actor: Annotated[Identity, Depends(identity)]
+    ) -> list[ProcessingRunResponse]:
+        return reprocess_item(settings, actor.owner_id, item_id)
 
     @app.post("/api/v1/capture/file", response_model=CaptureResponse, status_code=201)
     def post_file(

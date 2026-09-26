@@ -16,8 +16,9 @@ from bag.auth import token_hash
 from bag.config import Settings
 from bag.db import connection
 from bag.ids import uuid7
+from bag.jobs import Scope, reprocess
 from bag.storage import FileSystemStorage
-from bag.tokens import TokenAdminError, create_token, list_tokens, revoke_token
+from bag.tokens import TokenAdminError, create_token, list_tokens, resolve_owner, revoke_token
 from bag.worker import Worker
 
 SHUTDOWN_GRACE_SECONDS = 30
@@ -46,6 +47,27 @@ def initialize(settings: Settings) -> str | None:
     return token
 
 
+def reprocess_items(settings: Settings, scope: Scope, owner_id: UUID | None) -> dict[str, int]:
+    """Schedule processing per live item in separate short transactions."""
+    with connection(settings) as conn:
+        owner_id = resolve_owner(conn, owner_id)
+        ids = [
+            row["id"]
+            for row in conn.execute(
+                "SELECT id FROM item WHERE owner_id = %s AND deleted_at IS NULL ORDER BY id",
+                (owner_id,),
+            ).fetchall()
+        ]
+    items = jobs = 0
+    for item_id in ids:
+        with connection(settings) as conn:
+            scheduled = reprocess(conn, settings, owner_id, item_id, scope) or []
+        if scheduled:
+            items += 1
+            jobs += len(scheduled)
+    return {"items": items, "jobs": jobs}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="bag")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -62,8 +84,23 @@ def main() -> None:
             action_parser.add_argument("--name", default="recovery")
         elif action == "revoke":
             action_parser.add_argument("token_id", type=UUID, help="Token ID from bag token list")
+    reprocess_parser = commands.add_parser("reprocess", help="Schedule processing again")
+    reprocess_parser.add_argument("--owner", type=UUID, help="Required if multiple owners exist")
+    reprocess_parser.add_argument(
+        "--scope",
+        choices=("missing", "failed", "all"),
+        default="missing",
+        help="Processors without a run (default), failed runs, or every processor",
+    )
     args = parser.parse_args()
-    if args.command == "token":
+    if args.command == "reprocess":
+        try:
+            print(json.dumps(reprocess_items(Settings(), args.scope, args.owner)))
+        except TokenAdminError as exc:
+            parser.exit(1, f"{exc}\n")
+        except psycopg.Error:
+            parser.exit(1, "Database operation failed; scheduling stopped.\n")
+    elif args.command == "token":
         try:
             settings = Settings()
             if args.action == "list":

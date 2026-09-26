@@ -1,6 +1,7 @@
 # Data model as built
 
-Migration `0001_foundation` creates the tables below; `0002_jobs` adds `job`. All
+Migration `0001_foundation` creates the tables below; `0002_jobs` adds `job` and
+`0003_active_job` its unique active-job index. All
 have server-generated UUIDv7 primary keys. Timestamps use `timestamptz`; API
 connections use UTC. `user` is the ownership root; every other table has `owner_id`.
 
@@ -66,8 +67,11 @@ attempts) and one `job` (`queued`, `max_attempts` from `BAG_JOB_MAX_ATTEMPTS`) f
 each registered processor, and sets `item.processing_status = queued`. `job` rows
 are queue entries: `run_after` delays retries, `lease_expires_at` is set exactly while
 `running` (a CHECK constraint enforces this) and `worker_id` names the claimant.
-Partial indexes cover queued jobs by `run_after` and running jobs by lease expiry.
-Job rows are kept after completion for auditing; nothing deletes them yet.
+Partial indexes cover queued jobs by `run_after` and running jobs by lease expiry,
+and a partial unique index allows at most one queued or running job per owner, item
+and processor. Job rows are kept after completion for auditing; nothing deletes them yet.
+Reprocessing upserts the run back to `pending` with zero attempts and adds a job
+unless an active one exists.
 
 `processing_run` is the state clients read: `status`, `attempts` (mirrors the job),
 `last_error` (bounded to 500 characters, only processor-chosen messages or exception
@@ -85,7 +89,7 @@ is bounded to 1 MiB; when its generated search vector still exceeds PostgreSQL's
 tsvector limit, the run fails permanently and `extracted_text` stays NULL.
 
 Items captured before `0002_jobs` keep `processing_status = ready` and have no runs
-or jobs; reprocessing them requires the pending reprocess feature.
+or jobs until `bag reprocess` schedules the missing processors.
 
 The generated GIN-indexed `search_vector` combines simple and German/English text
 configurations over title, extracted text, URL and note. Search endpoints are pending.
@@ -97,5 +101,5 @@ storage only after the last live or trashed reference is gone.
 
 `bag migrate` runs packaged migration assets, including in installed wheels.
 Downgrades drop tables and are destructive; use only on disposable test databases.
-Back up real data before migrations. Updating to `0002_jobs` requires running
+Back up real data before migrations. Updating to `0002_jobs` or later requires running
 `bag migrate` before starting the new API and worker, which otherwise report not ready.

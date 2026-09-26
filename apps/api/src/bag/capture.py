@@ -4,12 +4,13 @@ from typing import BinaryIO
 from uuid import UUID
 
 import filetype
+import psycopg
 from fastapi import HTTPException
 
 from bag.config import Settings
 from bag.db import Row, connection
 from bag.ids import uuid7
-from bag.jobs import enqueue
+from bag.jobs import reprocess, schedule
 from bag.schemas import (
     CaptureResponse,
     FileCapture,
@@ -153,7 +154,7 @@ def _capture(
                     (uuid7(), owner_id, item_id, duplicate_id),
                 )
             # Jobs commit with the item: a stored capture is always scheduled, never orphaned.
-            enqueue(conn, settings, owner_id, item_id)
+            schedule(conn, settings, owner_id, item_id)
             result = CaptureResponse(
                 id=item_id,
                 processing_status="queued",
@@ -185,6 +186,17 @@ def get_item(settings: Settings, owner_id: UUID, item_id: UUID) -> ItemResponse:
     return ItemResponse.model_validate(row)
 
 
+def _runs(
+    conn: psycopg.Connection[Row], owner_id: UUID, item_id: UUID
+) -> list[ProcessingRunResponse]:
+    rows = conn.execute(
+        "SELECT processor, status, attempts, last_error, started_at, finished_at "
+        "FROM processing_run WHERE owner_id = %s AND item_id = %s ORDER BY processor",
+        (owner_id, item_id),
+    ).fetchall()
+    return [ProcessingRunResponse.model_validate(row) for row in rows]
+
+
 def get_processing(
     settings: Settings, owner_id: UUID, item_id: UUID
 ) -> list[ProcessingRunResponse]:
@@ -195,9 +207,16 @@ def get_processing(
         ).fetchone()
         if item is None:
             raise HTTPException(404, "Item not found")
-        rows = conn.execute(
-            "SELECT processor, status, attempts, last_error, started_at, finished_at "
-            "FROM processing_run WHERE owner_id = %s AND item_id = %s ORDER BY processor",
-            (owner_id, item_id),
-        ).fetchall()
-    return [ProcessingRunResponse.model_validate(row) for row in rows]
+        return _runs(conn, owner_id, item_id)
+
+
+def reprocess_item(
+    settings: Settings, owner_id: UUID, item_id: UUID
+) -> list[ProcessingRunResponse]:
+    with connection(settings) as conn:
+        scheduled = reprocess(conn, settings, owner_id, item_id)
+        if scheduled is None:
+            raise HTTPException(404, "Item not found")
+        result = _runs(conn, owner_id, item_id)
+    logger.info("reprocess_scheduled", extra={"item_id": item_id, "owner_id": owner_id})
+    return result

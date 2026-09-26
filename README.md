@@ -103,10 +103,29 @@ curl --fail-with-body -sS "http://localhost:8000/api/v1/items/$ITEM_ID/processin
 Each entry shows `processor`, `status` (`pending`, `running`, `succeeded`, `failed`
 or `skipped`), `attempts`, a short `last_error` and timestamps. The item's
 `processing_status` summarizes them: `queued`, `processing`, `ready`, `partial`
-(some processor failed) or `failed`. Items captured before this version stay `ready`
-without runs; a reprocess command is planned. Worker logs record job, item and
-processor IDs but never content. If the worker is stopped, captures still succeed
-and remain queued until it returns; `docker compose logs bag-worker` shows progress.
+(some processor failed) or `failed`. Worker logs record job, item and processor IDs
+but never content. If the worker is stopped, captures still succeed and remain
+queued until it returns; `docker compose logs bag-worker` shows progress.
+
+To run the processors again, for example after a failure or an update that adds
+processors, call the reprocess endpoint. It returns the reset runs with HTTP 202 and
+never duplicates a job that is still queued or running:
+
+```sh
+curl --fail-with-body -sS -X POST "http://localhost:8000/api/v1/items/$ITEM_ID/reprocess" \
+  -H "Authorization: Bearer $BAG_TOKEN"
+```
+
+Items captured before this version are `ready` without runs. Schedule them, and any
+processor added later, on the server; the default scope only touches processors that
+never ran, `--scope failed` retries failed runs and `--scope all` reruns everything:
+
+```sh
+docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api bag reprocess
+```
+
+The command prints how many items and jobs were scheduled and requires `--owner UUID`
+when several users exist. Reprocessing never changes originals or notes.
 
 ## Try URL capture
 

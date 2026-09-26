@@ -5,12 +5,11 @@ Actionable outstanding work only. Keep items concrete; move vague ideas to `docs
 Phases 0 and 1 are implemented: text/URL/file capture survives container recreation,
 and server-side token creation, listing, revocation and lost-token recovery are available.
 Phase 2 has a leased PostgreSQL job queue, a worker with bounded retries and recovery,
-`mime_detect`/`text_extract` processors and a derived item status.
+`mime_detect`/`text_extract` processors, a derived item status and reprocessing
+through the API and `bag reprocess`.
 
 ## Phase 2 — Processing and search
 
-- [ ] Add `POST /items/{id}/reprocess` and a `bag reprocess` command that reset runs
-      and enqueue jobs, including for items captured before migration `0002_jobs`.
 - [ ] Add a lightweight language detector processor that sets `item.language`
       (`de`/`en`) so the German/English search configuration applies.
 - [ ] Implement SSRF-safe URL fetching with DNS/IP validation, connection pinning,

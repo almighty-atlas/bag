@@ -115,3 +115,5 @@ message while the original stays intact and downloadable. The item status follow
 the runs: `queued`, `processing`, `ready`, `partial` or `failed`. A crashed worker
 leaves an expired lease that another worker reclaims; results of a lost lease are
 discarded. Clients poll `GET /api/v1/items/{id}` or `/processing` for progress.
+`POST /api/v1/items/{id}/reprocess` schedules every processor again after a
+permanent failure or a new processor; `bag reprocess` covers whole bags.

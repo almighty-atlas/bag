@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Literal
 from uuid import UUID
 
 import psycopg
@@ -59,17 +60,31 @@ class ClaimedJob:
     max_attempts: int
 
 
-def enqueue(
+def schedule(
     conn: psycopg.Connection[Row],
     settings: Settings,
     owner_id: UUID,
     item_id: UUID,
     processors: Iterable[str] = PROCESSORS,
-) -> None:
-    """Schedule processors inside the caller's transaction, alongside the item."""
+) -> list[str]:
+    """Reset runs and enqueue jobs inside the caller's transaction.
+
+    Processors with a queued or running job are left alone; the unique active-job
+    index rejects duplicates that slip past this check.
+    """
+    scheduled: list[str] = []
     for processor in processors:
+        active = conn.execute(
+            "SELECT id FROM job WHERE owner_id = %s AND item_id = %s AND processor = %s "
+            "AND status IN ('queued', 'running')",
+            (owner_id, item_id, processor),
+        ).fetchone()
+        if active is not None:
+            continue
         conn.execute(
-            "INSERT INTO processing_run (id, owner_id, item_id, processor) VALUES (%s, %s, %s, %s)",
+            "INSERT INTO processing_run (id, owner_id, item_id, processor) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (owner_id, item_id, processor) DO UPDATE SET status = 'pending', "
+            "attempts = 0, last_error = NULL, started_at = NULL, finished_at = NULL",
             (uuid7(), owner_id, item_id, processor),
         )
         conn.execute(
@@ -77,6 +92,50 @@ def enqueue(
             "VALUES (%s, %s, %s, %s, %s)",
             (uuid7(), owner_id, item_id, processor, settings.job_max_attempts),
         )
+        scheduled.append(processor)
+    return scheduled
+
+
+Scope = Literal["all", "missing", "failed"]
+
+
+def reprocess(
+    conn: psycopg.Connection[Row],
+    settings: Settings,
+    owner_id: UUID,
+    item_id: UUID,
+    scope: Scope = "all",
+) -> list[str] | None:
+    """Schedule processors again for a live item; None when the item is not visible."""
+    # Lock order matches claim/finish (job before item) to avoid deadlocks.
+    conn.execute(
+        "SELECT id FROM job WHERE owner_id = %s AND item_id = %s "
+        "AND status IN ('queued', 'running') FOR UPDATE",
+        (owner_id, item_id),
+    )
+    item = conn.execute(
+        "SELECT id FROM item WHERE owner_id = %s AND id = %s AND deleted_at IS NULL FOR UPDATE",
+        (owner_id, item_id),
+    ).fetchone()
+    if item is None:
+        return None
+    if scope == "all":
+        processors = list(PROCESSORS)
+    else:
+        runs = {
+            row["processor"]: row["status"]
+            for row in conn.execute(
+                "SELECT processor, status FROM processing_run WHERE owner_id = %s AND item_id = %s",
+                (owner_id, item_id),
+            ).fetchall()
+        }
+        if scope == "missing":
+            processors = [name for name in PROCESSORS if name not in runs]
+        else:
+            processors = [name for name in PROCESSORS if runs.get(name) == "failed"]
+    scheduled = schedule(conn, settings, owner_id, item_id, processors)
+    derive_status(conn, owner_id, item_id)
+    return scheduled
 
 
 def derive_status(conn: psycopg.Connection[Row], owner_id: UUID, item_id: UUID) -> None:
