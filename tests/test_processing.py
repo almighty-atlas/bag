@@ -30,7 +30,7 @@ def test_capture_enqueues_transactionally_and_worker_enriches_text(
     headers: dict[str, str],
     worker: Worker,
 ) -> None:
-    content = "Grüße aus der Tasche.\n<script>untrusted</script>"
+    content = "Grüße aus der Tasche, die wir noch nicht geleert haben.\n<script>untrusted</script>"
     saved = client.post("/api/v1/capture/text", json={"content": content}, headers=headers).json()
     assert saved["processing_status"] == "queued"
     item = client.get(f"/api/v1/items/{saved['id']}", headers=headers).json()
@@ -123,7 +123,10 @@ def test_failures_retry_with_bounds_and_preserve_originals(
     storage = FileSystemStorage(settings.storage_path)
     flaky = Worker(settings, storage, {**PROCESSORS, "text_extract": crash})
     saved = client.post("/api/v1/capture/text", json={"content": "keep"}, headers=headers).json()
-    assert drain(flaky, limit=2 + settings.job_max_attempts) == 1 + settings.job_max_attempts
+    others = len(PROCESSORS) - 1
+    assert drain(flaky, limit=others + 1 + settings.job_max_attempts) == (
+        others + settings.job_max_attempts
+    )
     item = client.get(f"/api/v1/items/{saved['id']}", headers=headers).json()
     assert item["processing_status"] == "partial"
     assert item["content"] == "keep" and item["extracted_text"] is None
@@ -139,9 +142,9 @@ def test_failures_retry_with_bounds_and_preserve_originals(
         ).fetchone()
         assert job == {"status": "failed", "attempts": settings.job_max_attempts}
 
-    broken = Worker(settings, storage, {"mime_detect": permanent, "text_extract": permanent})
+    broken = Worker(settings, storage, dict.fromkeys(PROCESSORS, permanent))
     saved = client.post("/api/v1/capture/text", json={"content": "keep 2"}, headers=headers).json()
-    assert drain(broken) == 2
+    assert drain(broken) == len(PROCESSORS)
     item = client.get(f"/api/v1/items/{saved['id']}", headers=headers).json()
     assert item["processing_status"] == "failed" and item["content"] == "keep 2"
     assert all(
@@ -163,7 +166,7 @@ def test_retry_backoff_delays_requeued_jobs(
         slow, FileSystemStorage(settings.storage_path), {**PROCESSORS, "mime_detect": crash}
     )
     saved = client.post("/api/v1/capture/text", json={"content": "later"}, headers=headers).json()
-    assert drain(worker) == 2
+    assert drain(worker) == len(PROCESSORS)
     item = client.get(f"/api/v1/items/{saved['id']}", headers=headers).json()
     assert item["processing_status"] == "processing"
     run = runs(client, headers, saved["id"])["mime_detect"]
@@ -195,9 +198,9 @@ def test_lease_expiry_recovery_and_stale_results_are_discarded(
     # A live lease is not stolen; an expired one is recovered.
     with connection(settings) as conn:
         assert conn.execute("SELECT count(*) AS n FROM job WHERE status = 'queued'").fetchone() == {
-            "n": 1
+            "n": len(PROCESSORS) - 1
         }
-    assert drain(worker) == 1
+    assert drain(worker) == len(PROCESSORS) - 1
     assert runs(client, headers, saved["id"])[first.processor]["status"] == "running"
     with connection(settings) as conn:
         conn.execute(
@@ -223,7 +226,7 @@ def test_lease_expiry_recovery_and_stale_results_are_discarded(
                 "UPDATE job SET lease_expires_at = now() - interval '1 second' WHERE id = %s",
                 (job.id,),
             )
-    assert drain(worker) == 2
+    assert drain(worker) == len(PROCESSORS)
     result = runs(client, headers, saved["id"])
     assert result["mime_detect"]["status"] == "failed"
     assert result["mime_detect"]["last_error"] == "Lease expired after the final attempt"
@@ -282,7 +285,7 @@ def test_search_vector_limit_fails_permanently_without_data_loss(
     saved = client.post(
         "/api/v1/capture/file", headers=headers, files={"file": ("words.txt", data)}
     ).json()
-    assert drain(worker) == 2
+    assert drain(worker) == len(PROCESSORS)
     result = runs(client, headers, saved["id"])
     assert result["mime_detect"]["status"] == "succeeded"
     assert result["text_extract"]["status"] == "failed"
@@ -318,3 +321,53 @@ def test_processing_endpoint_scoping_and_worker_readiness(
     with TestClient(create_app(settings, worker=True, worker_alive=lambda: True)) as alive:
         assert alive.get("/ready").status_code == 200
         assert alive.get(path, headers=headers).status_code == 404
+
+
+def test_language_detection_enables_stemmed_search(
+    settings: Settings,
+    client: TestClient,
+    headers: dict[str, str],
+    worker: Worker,
+) -> None:
+    german = client.post(
+        "/api/v1/capture/text",
+        json={"content": "Die Taschen sind voll und wir haben noch nicht alles geholt."},
+        headers=headers,
+    ).json()
+    english = client.post(
+        "/api/v1/capture/file",
+        headers=headers,
+        files={"file": ("bags.txt", b"The bags are full and we have not yet fetched everything.")},
+    ).json()
+    url = client.post(
+        "/api/v1/capture/url", headers=headers, json={"url": "https://example.org/die-der-das"}
+    ).json()
+    drain(worker)
+    assert client.get(f"/api/v1/items/{german['id']}", headers=headers).json()["language"] == "de"
+    assert client.get(f"/api/v1/items/{english['id']}", headers=headers).json()["language"] == "en"
+    item = client.get(f"/api/v1/items/{url['id']}", headers=headers).json()
+    assert item["language"] is None and item["processing_status"] == "ready"
+    assert runs(client, headers, url["id"])["language"]["status"] == "skipped"
+    with connection(settings) as conn:
+        stemmed = conn.execute(
+            "SELECT id FROM item WHERE search_vector @@ plainto_tsquery('german', 'Tasche')"
+        ).fetchall()
+        assert [str(row["id"]) for row in stemmed] == [german["id"]]
+        stemmed = conn.execute(
+            "SELECT id FROM item WHERE search_vector @@ plainto_tsquery('english', 'bag')"
+        ).fetchall()
+        assert [str(row["id"]) for row in stemmed] == [english["id"]]
+        row = conn.execute("SELECT metadata FROM item WHERE id = %s", (german["id"],)).fetchone()
+        assert row is not None and row["metadata"]["language"] == {"detected": "de"}
+        # A user choice survives reprocessing.
+        conn.execute(
+            "UPDATE item SET language = 'en', "
+            """metadata = metadata || '{"language": {"user": true}}' WHERE id = %s""",
+            (german["id"],),
+        )
+    assert (
+        client.post(f"/api/v1/items/{german['id']}/reprocess", headers=headers).status_code == 202
+    )
+    drain(worker)
+    assert client.get(f"/api/v1/items/{german['id']}", headers=headers).json()["language"] == "en"
+    assert runs(client, headers, german["id"])["language"]["status"] == "skipped"

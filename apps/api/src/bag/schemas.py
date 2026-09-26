@@ -75,6 +75,7 @@ class ItemResponse(BaseModel):
     original_filename: str | None
     content_hash: str | None
     extracted_text: str | None
+    language: str | None
     processing_status: str
     created_at: datetime
     captured_at: datetime

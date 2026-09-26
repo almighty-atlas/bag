@@ -10,7 +10,9 @@ from bag.processors import (
     MAX_EXTRACTED_BYTES,
     ProcessingItem,
     ProcessorError,
+    detect_language,
     kind_for,
+    language,
     looks_like_text,
     mime_detect,
     sniff_mime,
@@ -89,6 +91,46 @@ def test_processors_without_database(tmp_path: Path) -> None:
     with pytest.raises(ProcessorError) as error:
         mime_detect(missing, storage)
     assert error.value.retryable
+
+
+GERMAN = "Die Tasche ist voll, und wir haben noch nicht alles aus dem Keller geholt."
+ENGLISH = "The bag is full, and we have not yet fetched everything from the basement."
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (GERMAN, "de"),
+        (ENGLISH, "en"),
+        ("", None),
+        ("Tasche", None),
+        ("der die das", "de"),
+        ("the a an", "en"),
+        (GERMAN + " " + ENGLISH, None),
+        ("https://example.org/path?query=1", None),
+        ("DER DIE DAS UND", "de"),
+        ("x" * 50_000 + " " + GERMAN, None),  # only the first characters are inspected
+    ],
+)
+def test_detect_language(text: str, expected: str | None) -> None:
+    assert detect_language(text) == expected
+
+
+def test_language_processor_respects_user_choice(tmp_path: Path) -> None:
+    storage = FileSystemStorage(tmp_path)
+    assert language(file_item(None, "text", GERMAN), storage).updates == {"language": "de"}
+    outcome = language(file_item(stored(storage, ENGLISH.encode())), storage)
+    assert outcome.updates == {"language": "en"} and outcome.metadata == {"detected": "en"}
+    assert language(file_item(stored(storage, PDF)), storage).status == "skipped"
+    assert language(file_item(None, "url", "https://example.org/die-der-das"), storage).status == (
+        "skipped"
+    )
+    ambiguous = language(file_item(None, "text", "Tasche"), storage)
+    assert ambiguous.status == "skipped" and ambiguous.metadata == {"detected": None}
+    chosen = ProcessingItem(
+        uuid7(), uuid7(), "text", None, ENGLISH, None, {"language": {"user": True}}
+    )
+    assert language(chosen, storage).status == "skipped"
 
 
 def test_worker_loop_survives_database_outage_and_stops() -> None:

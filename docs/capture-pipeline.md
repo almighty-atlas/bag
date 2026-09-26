@@ -107,7 +107,10 @@ the title. Per input:
   `text/plain`. `text_extract` decodes such text files up to 1 MiB (truncation is
   noted in `metadata`) and skips every other format. A PDF or image is `ready`
   with `text_extract` skipped; no PDF, OCR or image extraction exists.
-- URL: both processors skip; nothing is fetched.
+- URL: all processors skip; nothing is fetched.
+- Language: for the same plain text, `language` sets `de` or `en` from function-word
+  counts when the evidence is clear, so German and English stemming apply in the
+  search vector; short, mixed or non-text items keep the `simple` configuration.
 
 Retryable failures such as an unavailable or corrupt original requeue with backoff
 up to `BAG_JOB_MAX_ATTEMPTS`; the run then shows `failed` with a bounded, generic

@@ -105,9 +105,13 @@ def _capture(
                 blob = storage.put(source, settings.max_upload_bytes)
                 digest = blob.sha256
                 content = None
+            # Link to a root that is not itself a duplicate: created_at is the transaction
+            # start, so under concurrency a duplicate may carry an earlier timestamp.
             duplicate = conn.execute(
-                "SELECT id FROM item WHERE owner_id = %s AND content_hash = %s "
-                "AND deleted_at IS NULL ORDER BY created_at, id LIMIT 1",
+                "SELECT i.id FROM item i WHERE i.owner_id = %s AND i.content_hash = %s "
+                "AND i.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM relation r "
+                "WHERE r.owner_id = i.owner_id AND r.source_item_id = i.id "
+                "AND r.relation_type = 'duplicate_of') ORDER BY i.created_at, i.id LIMIT 1",
                 (owner_id, digest),
             ).fetchone()
             item_id = uuid7()
@@ -176,7 +180,7 @@ def get_item(settings: Settings, owner_id: UUID, item_id: UUID) -> ItemResponse:
     with connection(settings) as conn:
         row = conn.execute(
             "SELECT id, kind, source, content, user_note, mime_type, original_filename, "
-            "content_hash, source_url, extracted_text, "
+            "content_hash, source_url, extracted_text, language, "
             "processing_status, created_at, captured_at, updated_at FROM item "
             "WHERE owner_id = %s AND id = %s AND deleted_at IS NULL",
             (owner_id, item_id),

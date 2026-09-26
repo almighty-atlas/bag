@@ -66,18 +66,22 @@ exponential backoff from `BAG_JOB_RETRY_SECONDS`, capped at one hour, until
 Unexpected exceptions record only the exception class. Deterministic database limits
 such as the search vector size fail the run permanently instead of retrying.
 
-Two processors exist. `mime_detect` re-verifies files from stored bytes (signature
+Three processors exist. `mime_detect` re-verifies files from stored bytes (signature
 library plus a strict UTF-8 plain-text check), sets `mime_type` and re-derives file
 kinds; text items are `text/plain` and URLs are skipped. `text_extract` copies text
 originals and decodes UTF-8 text files up to 1 MiB into `extracted_text`, noting
-truncation in `metadata`; other content is skipped. No PDF, image or URL extraction
-exists. Because `search_vector` is a generated column, extraction immediately makes
-items searchable once search endpoints exist. Every capture enqueues both processors
+truncation in `metadata`; other content is skipped. `language` counts German and
+English function words in the same plain text and sets `de` or `en` when the
+evidence is clear, skipping otherwise and whenever `metadata.language.user` marks a
+user choice. No PDF, image or URL extraction exists. Because `search_vector` is a
+generated column, extraction and language immediately make items searchable with
+the right stemmer once search endpoints exist. Every capture enqueues all processors
 regardless of kind; the worker log records claim and outcome with job, item, owner
 and processor IDs and the attempt number, never content or error details.
 
 `GET /api/v1/items/{id}/processing` lists runs with status, attempts, last error and
-timing for owned, live items. `GET /api/v1/items/{id}` includes `extracted_text`.
+timing for owned, live items. `GET /api/v1/items/{id}` includes `extracted_text` and
+`language`.
 `POST /api/v1/items/{id}/reprocess` resets the runs of every registered processor
 and enqueues jobs, skipping processors with a queued or running job; a partial unique
 index guarantees one active job per item and processor. `bag reprocess` does the same

@@ -81,12 +81,19 @@ outcome. A retry returns the run to `pending` with `last_error` kept and
 after every claim and finalize; the CHECK values `queued`, `processing`, `ready`,
 `partial` and `failed` follow spec section 7.
 
-Processors may write only `mime_type`, `kind`, `extracted_text` and `language`
-(the last is not yet populated), plus a per-processor object merged into
-`item.metadata` (currently `text_extract.truncated` and `extracted_bytes`). They
-never modify `content`, `title`, `user_note`, blobs or relations. `extracted_text`
-is bounded to 1 MiB; when its generated search vector still exceeds PostgreSQL's
-tsvector limit, the run fails permanently and `extracted_text` stays NULL.
+Processors may write only `mime_type`, `kind`, `extracted_text` and `language`,
+plus a per-processor object merged into `item.metadata` (`text_extract.truncated`
+and `extracted_bytes`; `language.detected` as `de`, `en` or null). They never modify
+`content`, `title`, `user_note`, blobs or relations. `extracted_text` is bounded to
+1 MiB; when its generated search vector still exceeds PostgreSQL's tsvector limit,
+the run fails permanently and `extracted_text` stays NULL. `language` holds ISO
+639-1 `de` or `en` and selects the stemming configuration of `search_vector`; the
+reserved marker `metadata.language.user = true` means the value was chosen by the
+user and detection must leave it alone.
+
+Duplicate relations always target a root item, one that is not itself the source
+of a `duplicate_of` relation, because `created_at` is the transaction start time
+and concurrent captures could otherwise pick a duplicate as the earliest row.
 
 Items captured before `0002_jobs` keep `processing_status = ready` and have no runs
 or jobs until `bag reprocess` schedules the missing processors.

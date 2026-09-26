@@ -87,10 +87,12 @@ docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api b
 docker compose --env-file .env -f deploy/compose/compose.yaml up -d bag-api bag-worker
 ```
 
-Every capture schedules two processors in the same transaction as the item:
-`mime_detect` verifies the type from stored bytes and `text_extract` fills
-`extracted_text` for text captures and UTF-8 text files (up to 1 MiB). PDFs, images,
-other binaries and URLs are stored unchanged and skipped by extraction. The worker
+Every capture schedules three processors in the same transaction as the item:
+`mime_detect` verifies the type from stored bytes, `text_extract` fills
+`extracted_text` for text captures and UTF-8 text files (up to 1 MiB), and
+`language` sets `de` or `en` when the text clearly reads as German or English, which
+selects the stemmer for search. PDFs, images, other binaries and URLs are stored
+unchanged and skipped by extraction and detection. The worker
 claims one job at a time, retries failures with exponential backoff up to
 `BAG_JOB_MAX_ATTEMPTS`, and takes over jobs whose lease (`BAG_JOB_LEASE_SECONDS`)
 expired after a crash. Originals are never modified by processing.
