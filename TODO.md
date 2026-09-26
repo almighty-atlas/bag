@@ -2,15 +2,10 @@
 
 Actionable outstanding work only. Keep items concrete; move vague ideas to `docs/spec.md` or drop them.
 
-Phase 0 and text/URL/file capture are implemented and survive container recreation.
-Token administration remains before closing Phase 1.
+Phases 0 and 1 are implemented: text/URL/file capture survives container recreation,
+and server-side token creation, listing, revocation and lost-token recovery are available.
 
-## Phase 1 — Remaining capture backend
-
-- [ ] Add administrative token creation/revocation and explicit lost-token recovery
-      without replacing the user or invalidating existing tokens.
-
-## Phase 2 — After capture is stable
+## Phase 2 — Processing and search
 
 - [ ] Implement PostgreSQL jobs and worker claim/retry/recovery (`FOR UPDATE SKIP LOCKED`,
       leases and bounded retries); replace the idle worker foundation.

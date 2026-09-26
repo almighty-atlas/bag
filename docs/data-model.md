@@ -21,6 +21,14 @@ Composite `(owner_id, id)` keys and matching foreign keys prevent cross-owner
 associations. Tag provenance lives on each assignment, allowing user/system/AI
 assignments of the same vocabulary without confusing their origins.
 
+Token administration uses the existing `api_token` table, without migration. New
+tokens carry UUIDv7 IDs and names of 1–200 characters without ASCII control characters.
+Names need not be unique. Secrets contain 256 random bits and are stored only as
+SHA-256 hashes. `last_used_at` updates during authentication; `revoked_at` records
+the first revocation and is preserved on repeats. Revoked rows remain visible to
+server administrators. Recovery creates another row for the same owner, including
+when all old tokens are revoked; it never changes item ownership or old token hashes.
+
 `item.content` preserves original text separately from `extracted_text`. Whitespace,
 newlines and Unicode are not normalized. NUL and invalid Unicode scalar values are
 rejected because PostgreSQL UTF-8 text cannot represent them. `content_hash` is

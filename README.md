@@ -147,6 +147,43 @@ docker compose --env-file .env -f deploy/compose/compose.yaml restart postgres b
 docker compose --env-file .env -f deploy/compose/compose.yaml up -d --wait
 ```
 
+## Token administration and recovery
+
+Run these commands on the server, using access to the Compose deployment. They do
+not require an existing bearer token. After updating the image with `up -d --build`:
+
+```sh
+# Create a separate token for a client; plaintext appears once in the JSON output.
+docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api \
+  bag token create --name laptop
+
+# List IDs, names and creation/use/revocation timestamps, never secrets or hashes.
+docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api \
+  bag token list
+
+# Replace TOKEN_ID with an ID from the list, not the bearer secret.
+docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api \
+  bag token revoke TOKEN_ID
+
+# Lost all tokens? Create a new credential for the existing user and data.
+docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api \
+  bag token recover
+```
+
+Save each newly printed `token` in a password manager. Recovery does not replace
+the user, alter captures or revoke other tokens. If a token might be compromised,
+explicitly revoke its ID after recovering access. Revoking the last active token
+is allowed because server-side recovery remains available. Repeating revocation
+is harmless; repeating create/recover creates another token, so these commands are
+not idempotent. If output was lost, list the tokens, revoke the unused ID and create
+another. Re-running `bag init` does not recover a token.
+
+The sole MVP user is selected automatically. If multiple users exist, all four
+commands require `--owner UUID`; a mismatched owner cannot revoke another user's
+token. With no user, run `bag init` first. These are privileged server administration
+commands, not public recovery endpoints or client-side database access. Web token
+management comes with the future web UI. Existing deployments need no new migration.
+
 ## Development and checks
 
 Install Python 3.12+ and uv:
@@ -209,8 +246,8 @@ archive into an empty replacement storage volume, owned by UID 10001. Preserve p
 and bytes; verify downloads before switching services. Neither component alone is a
 complete backup. `docker compose down` preserves data; `down -v` destroys volumes.
 For updates: back up, build, explicitly run `bag migrate`, then recreate API/worker
-with the quickstart commands. Retain the token across restarts; token recovery and
-management are not implemented yet.
+with the quickstart commands. Tokens remain valid across restarts; use the server-side
+recovery command above if the plaintext credential was lost.
 
 ## Planned stack
 

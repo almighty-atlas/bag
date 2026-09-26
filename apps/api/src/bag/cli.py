@@ -1,7 +1,11 @@
 import argparse
+import json
 import secrets
+from dataclasses import asdict
 from pathlib import Path
+from uuid import UUID
 
+import psycopg
 import uvicorn
 from alembic import command
 from alembic.config import Config
@@ -11,6 +15,7 @@ from bag.auth import token_hash
 from bag.config import Settings
 from bag.db import connection
 from bag.ids import uuid7
+from bag.tokens import TokenAdminError, create_token, list_tokens, revoke_token
 
 
 def migration_config() -> Config:
@@ -38,9 +43,43 @@ def initialize(settings: Settings) -> str | None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="bag")
-    parser.add_argument("command", choices=["migrate", "init", "worker"])
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ("migrate", "init", "worker"):
+        commands.add_parser(name)
+    token_parser = commands.add_parser("token", help="Server-side token administration")
+    actions = token_parser.add_subparsers(dest="action", required=True)
+    for action in ("list", "create", "recover", "revoke"):
+        action_parser = actions.add_parser(action)
+        action_parser.add_argument("--owner", type=UUID, help="Required if multiple owners exist")
+        if action == "create":
+            action_parser.add_argument("--name", required=True)
+        elif action == "recover":
+            action_parser.add_argument("--name", default="recovery")
+        elif action == "revoke":
+            action_parser.add_argument("token_id", type=UUID, help="Token ID from bag token list")
     args = parser.parse_args()
-    if args.command == "migrate":
+    if args.command == "token":
+        try:
+            settings = Settings()
+            if args.action == "list":
+                print(
+                    json.dumps(
+                        [asdict(row) for row in list_tokens(settings, args.owner)],
+                        default=str,
+                        indent=2,
+                    )
+                )
+            elif args.action == "revoke":
+                revoke_token(settings, args.token_id, args.owner)
+                print("Token revoked.")
+            else:
+                info, secret = create_token(settings, args.name, args.owner)
+                print(json.dumps({**asdict(info), "token": secret.get_secret_value()}, default=str))
+        except TokenAdminError as exc:
+            parser.exit(1, f"{exc}\n")
+        except psycopg.Error:
+            parser.exit(1, "Database operation failed; no token was displayed.\n")
+    elif args.command == "migrate":
         command.upgrade(migration_config(), "head")
     elif args.command == "init":
         token = initialize(Settings())

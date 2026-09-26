@@ -12,6 +12,17 @@ Migrations never run automatically. `bag migrate` and `bag init` are explicit
 server administration commands. Bootstrap uses a transaction-scoped advisory lock,
 creates one user and prints one random token after commit. Repeating it changes nothing.
 
+`bag token create/list/revoke/recover` administers credentials directly on the server.
+Each operation resolves the sole user or requires an explicit `--owner` if multiple
+users exist, then scopes token queries by that owner. Like bootstrap, owner discovery
+is an explicit server-admin exception to normal client API access. No public recovery
+endpoint exists. Creation/recovery generates 256 random bits, persists only SHA-256,
+and returns the secret after commit. Listing excludes both secrets and hashes.
+Recovery issues an additional token without changing existing users, captures or
+credentials. Revocation sets `revoked_at` idempotently; it never deletes token rows.
+Requests already authenticated may finish, while subsequent authentication rejects
+revoked credentials. The CLI never prints SQL or connection errors containing secrets.
+
 Bearer authentication hashes a token to resolve its owner. This credential lookup
 and global bootstrap are ownership-discovery/admin exceptions; subsequent queries
 use `owner_id`. Composite foreign keys prevent cross-owner associations. Revoked
