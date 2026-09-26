@@ -77,8 +77,17 @@ export function Feed({ route }: { route: Route & { name: "feed" } }) {
       )}
       <ul class="items">
         {rows.map((row) => (
-          <li key={row.id}>
-            <a href={href({ name: "item", id: row.id })} class="item">
+          <li key={row.id} class="item-row">
+            {route.trashed && (
+              <button
+                type="button"
+                class="restore"
+                onClick={() => void api.restore(row.id).then(() => load(false))}
+              >
+                Wiederherstellen
+              </button>
+            )}
+            <a href={route.trashed ? undefined : href({ name: "item", id: row.id })} class="item">
               <span class="icon" aria-hidden="true">
                 {KIND_ICON[row.kind] ?? "❔"}
               </span>

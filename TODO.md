@@ -23,8 +23,8 @@ collections with filters, and `bag export`.
 
 ## Phase 3 — Web / PWA
 
-- [ ] Web: restore from the trash view, collection editing, kind/date filters, token
-      management page, language override, snapshot preview.
+- [ ] Web: kind/date filters, tag and collection browsing pages, snapshot preview,
+      keyboard shortcut for capture.
 - [ ] Web: frontend unit tests (vitest) and an end-to-end smoke in CI against the stack.
 - [ ] PWA: service worker for the offline shell and a share target for URLs/text/files.
 - [ ] Rate-limit login attempts per username and address.

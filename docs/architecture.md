@@ -6,7 +6,8 @@ transactions. There is no ORM or Redis. Alembic uses SQLAlchemy only to apply
 packaged SQL migrations. `apps/web` is a Preact/Vite/TypeScript app (ADR-0017)
 that talks only to the API: login, feed with cursor paging, search with snippets,
 text/URL/file capture with the post-capture note, item detail with original
-download, editing of title, note and tags, processing state, reprocess and trash.
+download, editing of title, note, tags, collections and search language,
+processing state, reprocess, trash with restore, and client token management.
 
 Compose starts PostgreSQL 17, `bag-api`, `bag-worker` and `bag-web`. API and worker
 share a non-root image built from locked uv dependencies; `bag-web` is an nginx

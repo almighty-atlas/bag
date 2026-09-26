@@ -289,7 +289,8 @@ docker compose --env-file .env -f deploy/compose/compose.yaml up -d --wait
 The web app runs as the `bag-web` service on <http://localhost:8080> (`BAG_WEB_PORT`)
 and proxies the API on the same origin. It offers login, a feed, search, capture
 of text, links and files with an optional thought, item details with original
-download, editing of title, note and tags, processing state and the trash. Build
+download, editing of title, note, tags, collections and search language,
+processing state, the trash with restore, and client token management. Build
 and start it after setting a password:
 
 ```sh

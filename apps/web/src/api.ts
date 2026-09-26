@@ -134,6 +134,21 @@ export const api = {
   restore: (id: string) => request<ItemDetail>(`/api/v1/items/${encodeURIComponent(id)}/restore`, { method: "POST" }),
 };
 
+export interface ApiToken {
+  id: string;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export const tokens = {
+  list: () => request<ApiToken[]>("/api/v1/tokens"),
+  create: (name: string) =>
+    request<ApiToken & { token: string }>("/api/v1/tokens", { method: "POST", body: JSON.stringify({ name }) }),
+  revoke: (id: string) => request<void>(`/api/v1/tokens/${encodeURIComponent(id)}`, { method: "DELETE" }),
+};
+
 export const contentUrl = (id: string): string => `/api/v1/items/${encodeURIComponent(id)}/content`;
 
 /** Absolute http(s) URL on a single line: capture it as a link instead of text. */

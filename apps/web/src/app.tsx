@@ -4,20 +4,26 @@ import { ApiError, api, type Session } from "./api";
 import { Feed } from "./feed";
 import { ItemView } from "./item";
 import { Login } from "./login";
+import { Tokens } from "./tokens";
 
 /** Hash routes keep the static build free of server-side rewrites. */
-export type Route = { name: "feed"; query: string; trashed: boolean } | { name: "item"; id: string };
+export type Route =
+  | { name: "feed"; query: string; trashed: boolean }
+  | { name: "item"; id: string }
+  | { name: "tokens" };
 
 export function parseRoute(hash: string): Route {
   const [path = "", search = ""] = hash.replace(/^#/, "").split("?");
   const params = new URLSearchParams(search);
   const itemMatch = /^\/items\/([0-9a-f-]{36})$/.exec(path);
   if (itemMatch?.[1] !== undefined) return { name: "item", id: itemMatch[1] };
+  if (path === "/tokens") return { name: "tokens" };
   return { name: "feed", query: params.get("q") ?? "", trashed: params.get("trashed") === "1" };
 }
 
 export function href(route: Route): string {
   if (route.name === "item") return `#/items/${route.id}`;
+  if (route.name === "tokens") return "#/tokens";
   const params = new URLSearchParams();
   if (route.query) params.set("q", route.query);
   if (route.trashed) params.set("trashed", "1");
@@ -62,12 +68,17 @@ export function App() {
         <nav>
           <a href={href({ name: "feed", query: "", trashed: false })}>Feed</a>
           <a href={href({ name: "feed", query: "", trashed: true })}>Papierkorb</a>
+          <a href={href({ name: "tokens" })}>Token</a>
           <button type="button" class="link" onClick={signOut}>
             Abmelden ({session.username ?? session.display_name})
           </button>
         </nav>
       </header>
-      <main>{route.name === "item" ? <ItemView id={route.id} /> : <Feed route={route} />}</main>
+      <main>
+        {route.name === "item" && <ItemView id={route.id} />}
+        {route.name === "tokens" && <Tokens />}
+        {route.name === "feed" && <Feed route={route} />}
+      </main>
     </>
   );
 }

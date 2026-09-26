@@ -9,6 +9,8 @@ export function ItemView({ id }: { id: string }) {
   const [note, setNote] = useState("");
   const [title, setTitle] = useState("");
   const [tags, setTags] = useState("");
+  const [collections, setCollections] = useState("");
+  const [language, setLanguage] = useState("");
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
@@ -19,6 +21,8 @@ export function ItemView({ id }: { id: string }) {
       setNote(detail.user_note ?? "");
       setTitle(detail.title ?? "");
       setTags(detail.tags.join(", "));
+      setCollections(detail.collections.join(", "));
+      setLanguage(detail.language ?? "");
     } catch (failure: unknown) {
       setError(
         failure instanceof ApiError && failure.status === 404
@@ -40,15 +44,24 @@ export function ItemView({ id }: { id: string }) {
     event.preventDefault();
     setSaving(true);
     try {
-      const updated = await api.update(id, {
+      const names = (value: string) =>
+        value
+          .split(",")
+          .map((name) => name.trim())
+          .filter(Boolean);
+      const patch: Parameters<typeof api.update>[1] = {
         title: title.trim() || null,
         user_note: note.trim() || null,
-        tags: tags
-          .split(",")
-          .map((tag) => tag.trim())
-          .filter(Boolean),
-      });
+        tags: names(tags),
+        collections: names(collections),
+      };
+      // Only send the language when the user changed it: a value marks a user choice.
+      if (language !== (item.language ?? "")) {
+        patch.language = language === "de" || language === "en" ? language : null;
+      }
+      const updated = await api.update(id, patch);
       setItem(updated);
+      setLanguage(updated.language ?? "");
     } catch (failure: unknown) {
       setError(failure instanceof ApiError ? failure.message : "Speichern fehlgeschlagen.");
     } finally {
@@ -81,6 +94,21 @@ export function ItemView({ id }: { id: string }) {
         <label>
           Tags (durch Komma getrennt)
           <input value={tags} onInput={(e) => setTags((e.target as HTMLInputElement).value)} />
+        </label>
+        <label>
+          Sammlungen (durch Komma getrennt)
+          <input
+            value={collections}
+            onInput={(e) => setCollections((e.target as HTMLInputElement).value)}
+          />
+        </label>
+        <label>
+          Sprache für die Suche
+          <select value={language} onChange={(e) => setLanguage((e.target as HTMLSelectElement).value)}>
+            <option value="">automatisch erkennen</option>
+            <option value="de">Deutsch</option>
+            <option value="en">Englisch</option>
+          </select>
         </label>
         <div class="row">
           <button type="submit" disabled={saving}>

@@ -78,4 +78,9 @@ td { padding: 4px 6px; border-top: 1px solid var(--border); vertical-align: top;
 .status-failed { color: var(--danger); }
 .status-succeeded { color: var(--ok); }
 .login { width: min(360px, 100%); }
+select { font: inherit; border-radius: 8px; border: 1px solid var(--border); padding: 8px 10px; background: var(--bg); color: var(--text); }
+.item-row { position: relative; }
+.item-row .restore { position: absolute; right: 12px; top: 12px; font-size: 13px; padding: 4px 8px; }
+.item-row .restore + .item { padding-right: 150px; }
+.secret { user-select: all; overflow-wrap: anywhere; }
 .login h1 { margin: 0 0 6px; font-size: 22px; }
