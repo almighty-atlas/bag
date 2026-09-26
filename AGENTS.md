@@ -44,18 +44,25 @@ When the spec leaves a choice open, decide, write a short ADR in `docs/decisions
 
 ## Commands
 
-Fill this section in during Phase 0 and keep it current. Every command below must work from a fresh clone.
+Run from the repository root with Docker Compose and uv installed. Copy
+`.env.example` to `.env` first. README describes the disposable test database setup.
 
 ```text
 # development environment
-<compose up>
-<migrate>
+uv sync --frozen
+docker compose --env-file .env -f deploy/compose/compose.yaml up -d postgres
+docker compose --env-file .env -f deploy/compose/compose.yaml build
+docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api bag migrate
+docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api bag init
+docker compose --env-file .env -f deploy/compose/compose.yaml up -d bag-api bag-worker
 
 # quality gates
-<lint>
-<type check>
-<tests>
-<build>
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy
+uv run pytest  # set BAG_TEST_DATABASE_URL for PostgreSQL integration tests
+uv build
+docker compose --env-file .env -f deploy/compose/compose.yaml build
 ```
 
 ## Conventions

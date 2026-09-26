@@ -2,28 +2,33 @@
 
 Actionable outstanding work only. Keep items concrete; move vague ideas to `docs/spec.md` or drop them.
 
-## Phase 0 — Foundation
+Phase 0 and the first text-capture slice are implemented. Phase 1 is not complete.
 
-- [ ] Initialize repository tooling for `apps/api` (Python 3.12+, FastAPI, ruff, mypy or pyright, pytest).
-- [ ] Add `.env.example` with every configuration variable the API needs.
-- [ ] Add Docker Compose in `deploy/compose/` with `bag-api`, `bag-worker`, `postgres` (17). Keep `bag-web` and `minio` for later phases.
-- [ ] Add health (`/health`) and readiness (`/ready`) endpoints.
-- [ ] Add migration tooling and the initial schema: `user`, `api_token`, `item`, `blob`, `processing_run`, `tag`, `item_tag`, `collection`, `item_collection`, `relation`. All owned tables carry `owner_id`.
-- [ ] Seed the single MVP user and print a first API token on initial setup (`bag init` or equivalent).
-- [ ] Add CI running lint, type check, tests and build.
-- [ ] Write `docs/architecture.md`, `docs/data-model.md` and `docs/capture-pipeline.md` describing what exists after this phase.
-- [ ] Record ADRs for: ID strategy (UUIDv7), job queue (PostgreSQL-backed), storage layout (content-addressed).
-- [ ] Fill in the **Commands** section of `AGENTS.md`.
+## Phase 1 — Remaining capture backend
 
-## Phase 1 — First vertical slice: text capture
+- [ ] Implement content-addressed filesystem storage with atomic writes, file/directory
+      fsync, integrity checks and an abstraction for a later S3 backend.
+- [ ] Add multipart file capture with streaming limits, content-based MIME detection,
+      untrusted display filenames and original download as an attachment.
+- [ ] Add URL capture preserving input without fetching on the capture path.
+- [ ] Extend idempotency and duplicate detection to file/URL capture; test concurrent
+      uploads and crashes between blob persistence and database commit.
+- [ ] Add the `bag-storage` volume and document backup/restore of database plus blobs.
+- [ ] Add administrative token creation/revocation and explicit lost-token recovery
+      without replacing the user or invalidating existing tokens.
+- [ ] Verify file, URL and text originals survive full Compose restarts.
 
-- [ ] Bearer-token authentication middleware resolving `owner_id`.
-- [ ] `POST /api/v1/capture/text` with `content`, optional `user_note`, `captured_at`, `client_capture_id`.
-- [ ] Idempotency: replaying the same `client_capture_id` returns the original item.
-- [ ] Response only after the row is committed.
-- [ ] `GET /api/v1/items/{id}` returning the item with content intact.
-- [ ] Integration test proving `POST text -> persist Item -> return ID -> GET Item -> content intact`, including idempotent replay and Unicode content.
-- [ ] Update `README.md` with the exact commands to start the environment and verify the flow.
+## Phase 2 — After capture is stable
+
+- [ ] Implement PostgreSQL jobs and worker claim/retry/recovery (`FOR UPDATE SKIP LOCKED`,
+      leases and bounded retries); replace the idle worker foundation.
+- [ ] Enqueue processing transactionally with capture, add initial processors and
+      derive item status from processing runs. Preserve originals on failure.
+- [ ] Implement SSRF-safe URL fetching with DNS/IP validation, connection pinning,
+      redirect revalidation and size/time limits before enabling fetch jobs.
+- [ ] Add multilingual search and item-list/filter APIs using the generated vector.
+- [ ] Add soft delete, restore, explicit purge and reference-safe storage garbage collection.
+- [ ] Implement export of originals and JSONL metadata through the API.
 
 ## Later phases
 
