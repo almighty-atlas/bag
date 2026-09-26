@@ -5,7 +5,7 @@ Actionable outstanding work only. Keep items concrete; move vague ideas to `docs
 Phases 0 and 1 are implemented: text/URL/file capture survives container recreation,
 and server-side token creation, listing, revocation and lost-token recovery are available.
 Phase 2 has a leased PostgreSQL job queue, a worker with bounded retries and recovery,
-`mime_detect`/`text_extract`/`language` processors, a derived item status,
+`mime_detect`/`text_extract`/`language`/`url_fetch` processors, a derived item status,
 reprocessing through the API and `bag reprocess`, list/search endpoints with
 filters, ranking and snippets, idempotent trash/restore, explicit `bag purge`
 and `bag gc` maintenance commands, editing of title, note and language, tags and
@@ -13,8 +13,7 @@ collections with filters, and `bag export`.
 
 ## Phase 2 — Processing and search
 
-- [ ] Implement SSRF-safe URL fetching with DNS/IP validation, connection pinning,
-      redirect revalidation and size/time limits before enabling a `url_fetch` processor.
+- [ ] Serve `snapshot` blobs through the API (sanitized or sandboxed, never rendered inline).
 - [ ] Add `metadata` and `image_meta` processors (basic file/image metadata) and
       decide on PDF text extraction in an ADR before adding a dependency.
 - [ ] Add rename/delete for tags and collections (assignments must go with them).

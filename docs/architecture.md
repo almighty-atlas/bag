@@ -42,8 +42,8 @@ The capture response reports `processing_status: queued`.
 URL capture validates absolute HTTP(S) syntax and preserves the original string in
 PostgreSQL without normalization. It uses the same owner lock, idempotency namespace,
 hash-based duplicate detection and commit boundary as text/files. Neither capture
-nor validation performs DNS or HTTP requests. Private addresses can be saved; any
-future fetch worker must independently validate destinations against SSRF.
+nor validation performs DNS or HTTP requests. Private addresses can be saved; the
+worker's `url_fetch` processor validates destinations independently and skips them.
 
 ## Processing
 
@@ -57,8 +57,8 @@ transaction, reading originals through the verified storage handle.
 Processors are pure functions returning `succeeded` or `skipped` with updates limited
 to `mime_type`, `kind`, `extracted_text` and `language` plus per-processor metadata.
 A finalize transaction re-locks the job, verifies that this worker still holds it,
-writes the updates, marks run and job, and derives the item status from all runs in
-SQL: `queued` before any start, `processing` while any run is pending or running,
+writes the updates, marks run and job, locks the item row and derives the item status
+from all runs in SQL (the lock makes a concurrently committed finalize visible): `queued` before any start, `processing` while any run is pending or running,
 `ready` when nothing failed, `failed` when nothing succeeded, otherwise `partial`.
 Results arriving after a lost lease are discarded. Retryable failures requeue with
 exponential backoff from `BAG_JOB_RETRY_SECONDS`, capped at one hour, until
@@ -73,9 +73,15 @@ originals and decodes UTF-8 text files up to 1 MiB into `extracted_text`, noting
 truncation in `metadata`; other content is skipped. `language` counts German and
 English function words in the same plain text and sets `de` or `en` when the
 evidence is clear, skipping otherwise and whenever `metadata.language.user` marks a
-user choice. No PDF, image or URL extraction exists. Because `search_vector` is a
-generated column, extraction and language immediately make items searchable with
-the right stemmer once search endpoints exist. Every capture enqueues all processors
+user choice. `url_fetch` downloads `url` items under the SSRF policy of ADR-0015:
+DNS first, every answer must be public, the socket is pinned to the checked
+address, redirects are re-checked, size and time are bounded. It stores the page
+as a `snapshot` blob, sets `mime_type` from the declared type, extracts HTML or
+plain text into `extracted_text` and fills an empty `title` from the HTML title.
+Outcomes may also carry `defaults` (applied only where NULL) and derived blobs
+(one row per role, replaced on rerun). No PDF or image extraction exists. Because
+`search_vector` is a generated column, extraction and language immediately make
+items searchable with the right stemmer. Every capture enqueues all processors
 regardless of kind; the worker log records claim and outcome with job, item, owner
 and processor IDs and the attempt number, never content or error details.
 

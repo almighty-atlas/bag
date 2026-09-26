@@ -8,6 +8,7 @@ import psycopg
 
 from bag.config import Settings
 from bag.db import connection
+from bag.fetch import UrlFetcher
 from bag.jobs import ClaimedJob, claim, finish, load_item
 from bag.processors import PROCESSORS, Outcome, Processor, ProcessorError
 from bag.storage import BlobStorage
@@ -24,7 +25,10 @@ class Worker:
     ) -> None:
         self.settings = settings
         self.storage = storage
-        self.processors = PROCESSORS if processors is None else processors
+        self.processors = dict(PROCESSORS if processors is None else processors)
+        fetcher = self.processors.get("url_fetch")
+        if isinstance(fetcher, UrlFetcher):
+            self.processors["url_fetch"] = fetcher.with_settings(settings)
         self.worker_id = f"{socket.gethostname()}-{os.getpid()}-{secrets.token_hex(4)}"
 
     def run_once(self) -> bool:

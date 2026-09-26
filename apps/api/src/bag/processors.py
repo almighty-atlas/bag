@@ -1,49 +1,37 @@
 import codecs
 import re
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import Any, Literal
-from uuid import UUID
+from dataclasses import dataclass
 
 import filetype
 
-from bag.storage import BlobStorage, StorageError, StoredBlob
+from bag.fetch import UrlFetcher
+from bag.processing import (
+    MAX_EXTRACTED_BYTES as MAX_EXTRACTED_BYTES,
+)
+from bag.processing import (
+    SKIPPED as SKIPPED,
+)
+from bag.processing import (
+    Outcome as Outcome,
+)
+from bag.processing import (
+    ProcessingItem as ProcessingItem,
+)
+from bag.processing import (
+    Processor as Processor,
+)
+from bag.processing import (
+    ProcessorError as ProcessorError,
+)
+from bag.processing import (
+    SnapshotBlob as SnapshotBlob,
+)
+from bag.processing import (
+    is_plain_text as is_plain_text,
+)
+from bag.storage import BlobStorage, StorageError
 
 SIGNATURE_BYTES = 8192
-MAX_EXTRACTED_BYTES = 1_048_576
-_ALLOWED_CONTROLS = {"\t", "\n", "\r", "\x0b", "\x0c"}
-
-
-class ProcessorError(Exception):
-    """A failure whose message is safe to persist; retried unless stated otherwise."""
-
-    def __init__(self, message: str, *, retryable: bool = True) -> None:
-        super().__init__(message)
-        self.retryable = retryable
-
-
-@dataclass(frozen=True)
-class ProcessingItem:
-    id: UUID
-    owner_id: UUID
-    kind: str
-    mime_type: str | None
-    content: str | None
-    original: StoredBlob | None
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class Outcome:
-    status: Literal["succeeded", "skipped"]
-    # Only enrichment columns; originals, notes and titles are never touched.
-    updates: dict[str, str | None] = field(default_factory=dict)
-    metadata: dict[str, object] = field(default_factory=dict)
-
-
-Processor = Callable[[ProcessingItem, BlobStorage], Outcome]
-
-SKIPPED = Outcome("skipped")
 
 
 def kind_for(mime_type: str) -> str:
@@ -52,13 +40,6 @@ def kind_for(mime_type: str) -> str:
     if mime_type == "application/pdf":
         return "document"
     return "file"
-
-
-def is_plain_text(value: str) -> bool:
-    """Non-empty text without NUL, DEL or C0 controls other than common whitespace."""
-    return bool(value) and not any(
-        (ord(c) < 32 and c not in _ALLOWED_CONTROLS) or ord(c) == 127 for c in value
-    )
 
 
 def looks_like_text(sample: bytes) -> bool:
@@ -190,4 +171,5 @@ PROCESSORS: dict[str, Processor] = {
     "mime_detect": mime_detect,
     "text_extract": text_extract,
     "language": language,
+    "url_fetch": UrlFetcher(),
 }

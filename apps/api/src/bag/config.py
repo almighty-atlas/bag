@@ -18,3 +18,7 @@ class Settings(BaseSettings):
     job_max_attempts: int = Field(default=5, ge=1, le=100)
     job_retry_seconds: float = Field(default=5.0, ge=0, le=3600)
     trash_retention_days: int = Field(default=30, ge=0, le=36_500)
+    fetch_urls: bool = True
+    fetch_max_bytes: int = Field(default=5_242_880, ge=1024)
+    fetch_timeout_seconds: float = Field(default=10.0, ge=0.1, le=300)
+    fetch_max_redirects: int = Field(default=5, ge=0, le=20)

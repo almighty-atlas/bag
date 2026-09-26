@@ -10,7 +10,7 @@ connections use UTC. `user` is the ownership root; every other table has `owner_
 | `user` | Ownership root: ID, display name, creation time |
 | `api_token` | Owner, name, unique SHA-256 token hash, creation/use/revocation times |
 | `item` | Original content, source, kind, note, capture key, hash, status, timestamps, deletion marker and extraction fields |
-| `blob` | Item, role, SHA-256, size, MIME and hash-derived path; filesystem originals |
+| `blob` | Item, role (`original` or `snapshot`), SHA-256, size, MIME and hash-derived path |
 | `processing_run` | Unique owner/item/processor, status, attempts, error and run times |
 | `job` | Queue entry per owner/item/processor: status, attempts, limit, `run_after`, lease expiry and worker ID |
 | `tag` | Owner-scoped unique tag name |
@@ -86,8 +86,11 @@ after every claim and finalize; the CHECK values `queued`, `processing`, `ready`
 `partial` and `failed` follow spec section 7.
 
 Processors may write only `mime_type`, `kind`, `extracted_text` and `language`,
-plus a per-processor object merged into `item.metadata` (`text_extract.truncated`
-and `extracted_bytes`; `language.detected` as `de`, `en` or null). They never modify
+default `title` where it is NULL, add non-original blob rows (one per role,
+replaced on rerun), and merge a per-processor object into `item.metadata`
+(`text_extract.truncated` and `extracted_bytes`; `language.detected`;
+`url_fetch.final_url`, `status`, `redirects`, `size_bytes`, `fetched_at` or
+`skipped` with the reason). They never modify
 `content`, `title`, `user_note`, blobs or relations. `extracted_text` is bounded to
 1 MiB; when its generated search vector still exceeds PostgreSQL's tsvector limit,
 the run fails permanently and `extracted_text` stays NULL. `language` holds ISO

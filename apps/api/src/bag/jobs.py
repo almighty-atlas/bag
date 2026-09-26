@@ -16,6 +16,7 @@ from bag.storage import StoredBlob
 logger = logging.getLogger("bag.jobs")
 
 ENRICHMENT_COLUMNS = frozenset({"mime_type", "kind", "extracted_text", "language"})
+DEFAULT_COLUMNS = frozenset({"title"})
 MAX_ERROR_LENGTH = 500
 MAX_RETRY_SECONDS = 3600.0
 
@@ -34,19 +35,15 @@ FROM candidate WHERE job.id = candidate.id
 RETURNING job.id, job.owner_id, job.item_id, job.processor, job.attempts, job.max_attempts
 """
 
-DERIVE_STATUS_SQL = """
-UPDATE item SET processing_status = derived.status, updated_at = now()
-FROM (
-    SELECT CASE
-        WHEN count(*) = 0 THEN 'ready'
-        WHEN bool_and(status = 'pending' AND started_at IS NULL) THEN 'queued'
-        WHEN bool_or(status IN ('pending', 'running')) THEN 'processing'
-        WHEN NOT bool_or(status = 'failed') THEN 'ready'
-        WHEN NOT bool_or(status = 'succeeded') THEN 'failed'
-        ELSE 'partial' END AS status
-    FROM processing_run WHERE owner_id = %s AND item_id = %s
-) AS derived
-WHERE item.owner_id = %s AND item.id = %s AND item.processing_status <> derived.status
+STATUS_SQL = """
+SELECT CASE
+    WHEN count(*) = 0 THEN 'ready'
+    WHEN bool_and(status = 'pending' AND started_at IS NULL) THEN 'queued'
+    WHEN bool_or(status IN ('pending', 'running')) THEN 'processing'
+    WHEN NOT bool_or(status = 'failed') THEN 'ready'
+    WHEN NOT bool_or(status = 'succeeded') THEN 'failed'
+    ELSE 'partial' END AS status
+FROM processing_run WHERE owner_id = %s AND item_id = %s
 """
 
 
@@ -139,7 +136,18 @@ def reprocess(
 
 
 def derive_status(conn: psycopg.Connection[Row], owner_id: UUID, item_id: UUID) -> None:
-    conn.execute(DERIVE_STATUS_SQL, (owner_id, item_id, owner_id, item_id))
+    # Lock the item first: a finalize committing concurrently must be visible to the
+    # computation, otherwise a stale snapshot could leave the item "processing" forever.
+    conn.execute(
+        "SELECT id FROM item WHERE owner_id = %s AND id = %s FOR UPDATE", (owner_id, item_id)
+    )
+    row = conn.execute(STATUS_SQL, (owner_id, item_id)).fetchone()
+    assert row is not None
+    conn.execute(
+        "UPDATE item SET processing_status = %s, updated_at = now() "
+        "WHERE owner_id = %s AND id = %s AND processing_status <> %s",
+        (row["status"], owner_id, item_id, row["status"]),
+    )
 
 
 def claim(conn: psycopg.Connection[Row], worker_id: str, lease_seconds: int) -> ClaimedJob | None:
@@ -211,6 +219,35 @@ def finish(
                 f"UPDATE item SET {assignments}, updated_at = now() "
                 "WHERE owner_id = %s AND id = %s",
                 (*result.updates.values(), job.owner_id, job.item_id),
+            )
+        if set(result.defaults) - DEFAULT_COLUMNS:
+            raise ValueError("Processor may only default allowlisted columns")
+        for column, value in result.defaults.items():
+            conn.execute(
+                f"UPDATE item SET {column} = coalesce({column}, %s), updated_at = now() "
+                "WHERE owner_id = %s AND id = %s",
+                (value, job.owner_id, job.item_id),
+            )
+        for snapshot in result.blobs:
+            if snapshot.role == "original":
+                raise ValueError("Processors may not replace originals")
+            conn.execute(
+                "DELETE FROM blob WHERE owner_id = %s AND item_id = %s AND role = %s",
+                (job.owner_id, job.item_id, snapshot.role),
+            )
+            conn.execute(
+                "INSERT INTO blob (id, owner_id, item_id, role, storage_key, sha256, "
+                "size_bytes, mime_type) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    uuid7(),
+                    job.owner_id,
+                    job.item_id,
+                    snapshot.role,
+                    snapshot.blob.storage_key,
+                    snapshot.blob.sha256,
+                    snapshot.blob.size_bytes,
+                    snapshot.mime_type,
+                ),
             )
         if result.metadata:
             conn.execute(

@@ -46,8 +46,9 @@ def test_capture_enqueues_transactionally_and_worker_enriches_text(
     assert item["extracted_text"] == item["content"] == content
     assert item["mime_type"] == "text/plain" and item["updated_at"] > item["created_at"]
     done = runs(client, headers, saved["id"])
-    for run in done.values():
-        assert run["status"] == "succeeded" and run["attempts"] == 1
+    for name, run in done.items():
+        expected = "skipped" if name == "url_fetch" else "succeeded"
+        assert run["status"] == expected and run["attempts"] == 1
         assert run["last_error"] is None and run["started_at"] and run["finished_at"]
     with connection(settings) as conn:
         jobs = conn.execute("SELECT status, lease_expires_at, attempts FROM job").fetchall()

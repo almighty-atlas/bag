@@ -27,6 +27,8 @@ def settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Settin
         storage_path=tmp_path / "storage",
         job_max_attempts=3,
         job_retry_seconds=0,
+        # Tests never reach the network; fetch tests opt in with a loopback policy.
+        fetch_urls=False,
     )
     with connection(value) as conn:
         conn.execute('TRUNCATE TABLE "user" CASCADE')

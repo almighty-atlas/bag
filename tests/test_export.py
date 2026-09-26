@@ -8,6 +8,7 @@ from bag.cli import main
 from bag.config import Settings
 from bag.db import connection
 from bag.export import ExportError, export_bag
+from bag.processors import PROCESSORS
 from bag.storage import FileSystemStorage
 from bag.worker import Worker
 from fastapi.testclient import TestClient
@@ -57,7 +58,7 @@ def test_export_writes_originals_and_metadata(
         "tags": 1,
         "collections": 1,
         "relations": 1,
-        "processing_runs": 9,
+        "processing_runs": 3 * len(PROCESSORS),
         "objects": 1,
     }
     manifest = json.loads((target / "manifest.json").read_text())
@@ -85,7 +86,7 @@ def test_export_writes_originals_and_metadata(
     assert relations[0]["target_item_id"] == pdf["id"]
     assert relations[0]["relation_type"] == "duplicate_of"
     runs = read_jsonl(target / "processing_runs.jsonl")
-    assert {row["processor"] for row in runs} == {"mime_detect", "text_extract", "language"}
+    assert {row["processor"] for row in runs} == set(PROCESSORS)
 
     # A non-empty target is refused; a corrupt original aborts instead of exporting junk.
     with pytest.raises(ExportError):

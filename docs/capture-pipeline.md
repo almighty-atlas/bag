@@ -46,11 +46,11 @@ controls and backslashes, and limits URLs to 8192 characters. Validation returns
 the original string without normalizing case, Unicode, port, escaping, query order
 or fragment. Both `content` and `source_url` store that exact string.
 
-No DNS, HTTP requests, redirects or blob writes occur. Private addresses are valid
-saved input, but a future fetch worker must enforce the SSRF policy independently.
-MIME stays NULL because no page was fetched. Both current processors skip URLs, so
-the item becomes `ready` after processing: this means capture is stored, not that
-the destination is reachable or the page has been archived.
+No DNS, HTTP requests, redirects or blob writes occur during capture. Private
+addresses are valid saved input; the worker's `url_fetch` processor enforces the
+SSRF policy independently and skips them. MIME stays NULL until a page was fetched.
+`ready` after capture-time processing means the capture is stored; whether the page
+could be archived shows in the `url_fetch` run.
 
 Capture locks the owner, resolves the shared text/URL/file idempotency key, hashes
 the UTF-8 original and commits item/duplicate relation together. Replay preserves
@@ -108,7 +108,12 @@ the title. Per input:
   `text/plain`. `text_extract` decodes such text files up to 1 MiB (truncation is
   noted in `metadata`) and skips every other format. A PDF or image is `ready`
   with `text_extract` skipped; no PDF, OCR or image extraction exists.
-- URL: all processors skip; nothing is fetched.
+- URL: `mime_detect`, `text_extract` and `language` skip. `url_fetch` resolves the
+  host, refuses non-public addresses, connects to the checked address, follows at
+  most five re-checked redirects and reads up to `BAG_FETCH_MAX_BYTES`. The body
+  becomes a `snapshot` blob; HTML and plain text fill `extracted_text` and, if the
+  item has no title yet, `title`. Refused or disabled fetches are `skipped` with a
+  reason in `metadata.url_fetch`; HTTP errors, oversize bodies and loops fail.
 - Language: for the same plain text, `language` sets `de` or `en` from function-word
   counts when the evidence is clear, so German and English stemming apply in the
   search vector; short, mixed or non-text items keep the `simple` configuration.

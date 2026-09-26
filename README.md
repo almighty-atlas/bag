@@ -227,10 +227,15 @@ Use the returned ID with `GET /api/v1/items/{item_id}`. Both `content` and
 `source_url` contain the exact URL as entered. Optional source, capture timestamp
 and retry keys work as for text/file capture. Only absolute HTTP(S) URLs up to
 8192 characters are accepted; whitespace, controls and backslashes are rejected.
-URLs are not normalized or fetched, including private addresses. No title, page
-snapshot or page MIME is available yet; both processors skip URLs, so the item
-becomes `ready` without any network access. Future fetching must apply independent
-SSRF checks; accepting a URL is not permission to fetch it.
+URLs are stored exactly as entered and never normalized. The worker then fetches
+the page: it resolves the host, refuses private, loopback and link-local addresses,
+connects only to the checked address, follows up to five re-checked redirects and
+reads at most `BAG_FETCH_MAX_BYTES` (5 MiB). The page is kept as a snapshot, its
+title fills an empty `title`, and HTML or plain text becomes searchable
+`extracted_text`. A refused destination is reported as `skipped` in the
+`url_fetch` run, not as an error. Set `BAG_FETCH_URLS=false` to keep the worker
+offline; the only outbound request Bag ever makes is this GET to the saved URL's
+own host.
 
 ## Try file capture
 
