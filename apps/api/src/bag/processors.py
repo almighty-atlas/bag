@@ -4,8 +4,10 @@ import struct
 from dataclasses import dataclass
 
 import filetype
+from pypdf import PasswordType, PdfReader
+from pypdf.errors import PdfReadError
 
-from bag.fetch import UrlFetcher
+from bag.fetch import UrlFetcher, clean_text
 from bag.processing import (
     MAX_EXTRACTED_BYTES,
     SKIPPED,
@@ -37,6 +39,7 @@ __all__ = [
     "language",
     "looks_like_text",
     "mime_detect",
+    "pdf_text",
     "sniff_mime",
     "text_extract",
 ]
@@ -167,12 +170,57 @@ def language(item: ProcessingItem, storage: BlobStorage) -> Outcome:
         # A user-set language is never overwritten by detection.
         return SKIPPED
     found = plain_text(item, storage)
-    if found is None:
+    # Fall back to text another processor extracted (PDF, fetched page) on a rerun.
+    text = found.text if found is not None else item.extracted_text
+    if not text:
         return SKIPPED
-    detected = detect_language(found.text)
+    detected = detect_language(text)
     if detected is None:
         return Outcome("skipped", metadata={"detected": None})
     return Outcome("succeeded", {"language": detected}, {"detected": detected})
+
+
+PDF_MAX_PAGES = 2000
+
+
+def pdf_text(item: ProcessingItem, storage: BlobStorage) -> Outcome:
+    """Text layer of PDF originals via pypdf, bounded like every other extraction."""
+    if item.original is None:
+        return SKIPPED
+    try:
+        with storage.open_verified(item.original) as source:
+            if sniff_mime(source.read(SIGNATURE_BYTES)) != "application/pdf":
+                return SKIPPED
+            source.seek(0)
+            try:
+                reader = PdfReader(source)
+                if reader.is_encrypted and reader.decrypt("") == PasswordType.NOT_DECRYPTED:
+                    return Outcome("skipped", metadata={"encrypted": True})
+                pages = len(reader.pages)
+                parts: list[str] = []
+                size = 0
+                truncated = pages > PDF_MAX_PAGES
+                for index, page in enumerate(reader.pages):
+                    if index >= PDF_MAX_PAGES:
+                        break
+                    chunk = page.extract_text() or ""
+                    size += len(chunk.encode("utf-8"))
+                    parts.append(chunk)
+                    if size > MAX_EXTRACTED_BYTES:
+                        truncated = True
+                        break
+            except (PdfReadError, ValueError, KeyError, TypeError, RecursionError) as exc:
+                raise ProcessorError("PDF could not be parsed", retryable=False) from exc
+    except StorageError as exc:
+        raise ProcessorError("Original unavailable or failed its integrity check") from exc
+    text = clean_text("\n".join(parts))
+    if text is None:
+        return Outcome("skipped", metadata={"pages": pages, "text_layer": False})
+    return Outcome(
+        "succeeded",
+        {"extracted_text": text},
+        {"pages": pages, "truncated": truncated, "extracted_bytes": len(text.encode("utf-8"))},
+    )
 
 
 def image_dimensions(data: bytes) -> tuple[int, int] | None:
@@ -250,4 +298,5 @@ PROCESSORS: dict[str, Processor] = {
     "language": language,
     "url_fetch": UrlFetcher(),
     "image_meta": image_meta,
+    "pdf_text": pdf_text,
 }

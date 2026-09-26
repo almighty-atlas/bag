@@ -106,8 +106,9 @@ the title. Per input:
 - File: `mime_detect` re-derives `mime_type` and file kind from stored bytes;
   unknown signatures that are strict UTF-8 without NUL or control bytes become
   `text/plain`. `text_extract` decodes such text files up to 1 MiB (truncation is
-  noted in `metadata`) and skips every other format. A PDF or image is `ready`
-  with `text_extract` skipped; no PDF, OCR or image extraction exists.
+  noted in `metadata`) and skips every other format. `pdf_text` extracts the text
+  layer of PDFs (unparseable files fail permanently, encrypted ones are skipped)
+  and `image_meta` records image dimensions; no OCR exists.
 - URL: `mime_detect`, `text_extract` and `language` skip. `url_fetch` resolves the
   host, refuses non-public addresses, connects to the checked address, follows at
   most five re-checked redirects and reads up to `BAG_FETCH_MAX_BYTES`. The body

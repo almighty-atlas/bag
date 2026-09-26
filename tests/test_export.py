@@ -15,10 +15,9 @@ from bag.processors import PROCESSORS
 from bag.storage import FileSystemStorage
 from bag.worker import Worker
 from fastapi.testclient import TestClient
-from helpers import drain
+from helpers import PDF, drain
 
 pytestmark = pytest.mark.integration
-PDF = b"%PDF-1.4\n%original\x00\xff\n%%EOF\n"
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:

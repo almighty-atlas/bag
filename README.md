@@ -92,9 +92,10 @@ Every capture schedules the processors in the same transaction as the item:
 `mime_detect` verifies the type from stored bytes, `text_extract` fills
 `extracted_text` for text captures and UTF-8 text files (up to 1 MiB),
 `language` sets `de` or `en` when the text clearly reads as German or English
-(which selects the stemmer for search), `url_fetch` archives saved links and
-`image_meta` records image dimensions from the file header. PDFs and other
-binaries are stored unchanged and skipped by extraction. The worker
+(which selects the stemmer for search), `url_fetch` archives saved links,
+`image_meta` records image dimensions from the file header and `pdf_text` makes
+the text layer of PDFs searchable (scanned PDFs without text stay as they are; no
+OCR). Other binaries are stored unchanged and skipped by extraction. The worker
 claims one job at a time, retries failures with exponential backoff up to
 `BAG_JOB_MAX_ATTEMPTS`, and takes over jobs whose lease (`BAG_JOB_LEASE_SECONDS`)
 expired after a crash. Originals are never modified by processing.

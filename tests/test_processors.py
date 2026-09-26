@@ -16,14 +16,14 @@ from bag.processors import (
     language,
     looks_like_text,
     mime_detect,
+    pdf_text,
     sniff_mime,
     text_extract,
 )
 from bag.storage import FileSystemStorage, StoredBlob
 from bag.worker import Worker
+from helpers import BROKEN_PDF, PDF, PDF_TEXT
 from pydantic import SecretStr
-
-PDF = b"%PDF-1.4\n%original\x00\xff\n%%EOF\n"
 
 
 @pytest.mark.parametrize(
@@ -132,6 +132,23 @@ def test_language_processor_respects_user_choice(tmp_path: Path) -> None:
         uuid7(), uuid7(), "text", None, ENGLISH, None, {"language": {"user": True}}
     )
     assert language(chosen, storage).status == "skipped"
+
+
+def test_pdf_text_extracts_and_fails_cleanly(tmp_path: Path) -> None:
+    storage = FileSystemStorage(tmp_path)
+    good = pdf_text(file_item(stored(storage, PDF), "document"), storage)
+    assert good.status == "succeeded" and good.updates == {"extracted_text": PDF_TEXT}
+    assert good.metadata == {"pages": 1, "truncated": False, "extracted_bytes": len(PDF_TEXT)}
+    with pytest.raises(ProcessorError) as error:
+        pdf_text(file_item(stored(storage, BROKEN_PDF), "document"), storage)
+    assert not error.value.retryable
+    assert pdf_text(file_item(stored(storage, b"plain text"), "file"), storage).status == "skipped"
+    assert pdf_text(file_item(None, "text", "x"), storage).status == "skipped"
+    # Language detection falls back to text another processor extracted.
+    german = ProcessingItem(
+        uuid7(), uuid7(), "document", "application/pdf", None, stored(storage, PDF), {}, GERMAN
+    )
+    assert language(german, storage).updates == {"language": "de"}
 
 
 def test_image_dimensions_from_headers() -> None:

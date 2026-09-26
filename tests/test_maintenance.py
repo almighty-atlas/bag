@@ -15,9 +15,7 @@ from bag.processors import PROCESSORS
 from bag.storage import FileSystemStorage, StorageError
 from bag.worker import Worker
 from fastapi.testclient import TestClient
-from helpers import drain
-
-PDF = b"%PDF-1.4\n%original\x00\xff\n%%EOF\n"
+from helpers import PDF, drain
 
 
 def objects(root: Path) -> set[str]:

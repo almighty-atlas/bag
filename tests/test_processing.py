@@ -13,10 +13,9 @@ from bag.processors import PROCESSORS, Outcome, ProcessingItem, ProcessorError
 from bag.storage import BlobStorage, FileSystemStorage
 from bag.worker import Worker
 from fastapi.testclient import TestClient
-from helpers import drain, runs
+from helpers import BROKEN_PDF, PDF, PDF_TEXT, drain, runs
 
 pytestmark = pytest.mark.integration
-PDF = b"%PDF-1.4\n%original\x00\xff\n%%EOF\n"
 PNG_HEADER = (
     b"\x89PNG\r\n\x1a\n"
     + b"\x00\x00\x00\x0dIHDR"
@@ -53,7 +52,7 @@ def test_capture_enqueues_transactionally_and_worker_enriches_text(
     assert item["mime_type"] == "text/plain" and item["updated_at"] > item["created_at"]
     done = runs(client, headers, saved["id"])
     for name, run in done.items():
-        expected = "skipped" if name in {"url_fetch", "image_meta"} else "succeeded"
+        expected = "skipped" if name in {"url_fetch", "image_meta", "pdf_text"} else "succeeded"
         assert run["status"] == expected and run["attempts"] == 1
         assert run["last_error"] is None and run["started_at"] and run["finished_at"]
     with connection(settings) as conn:
@@ -82,6 +81,7 @@ def test_file_kinds_text_files_urls_and_truncation(
         return str(response.json()["id"])
 
     pdf = upload("x.png", PDF)
+    broken = upload("broken.pdf", BROKEN_PDF)
     png = upload("photo.bin", PNG_HEADER + b"\x00" * 64)
     text = upload("notes.bin", "Gedanken über Wayland 💼\r\n\tTab".encode())
     binary = upload("junk.txt", b"\x00\x01\x02\xff" * 10, "text/plain")
@@ -93,9 +93,22 @@ def test_file_kinds_text_files_urls_and_truncation(
 
     item = client.get(f"/api/v1/items/{pdf}", headers=headers).json()
     assert item["kind"] == "document" and item["mime_type"] == "application/pdf"
-    assert item["processing_status"] == "ready" and item["extracted_text"] is None
+    assert item["processing_status"] == "ready" and item["extracted_text"] == PDF_TEXT
     assert runs(client, headers, pdf)["text_extract"]["status"] == "skipped"
     assert runs(client, headers, pdf)["image_meta"]["status"] == "skipped"
+    assert runs(client, headers, pdf)["pdf_text"]["status"] == "succeeded"
+    with connection(settings) as conn:
+        row = conn.execute("SELECT metadata FROM item WHERE id = %s", (pdf,)).fetchone()
+        assert row is not None and row["metadata"]["pdf_text"]["pages"] == 1
+    assert [
+        r["id"] for r in client.get("/api/v1/search?q=Buecher", headers=headers).json()["results"]
+    ] == [pdf]
+    broken_item = client.get(f"/api/v1/items/{broken}", headers=headers).json()
+    assert broken_item["processing_status"] == "partial" and broken_item["extracted_text"] is None
+    failed = runs(client, headers, broken)["pdf_text"]
+    assert failed["status"] == "failed" and failed["attempts"] == 1
+    assert failed["last_error"] == "PDF could not be parsed"
+    assert client.get(f"/api/v1/items/{broken}/content", headers=headers).content == BROKEN_PDF
 
     item = client.get(f"/api/v1/items/{png}", headers=headers).json()
     assert item["kind"] == "image" and item["mime_type"] == "image/png"

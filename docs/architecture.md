@@ -100,8 +100,10 @@ as a `snapshot` blob, sets `mime_type` from the declared type, extracts HTML or
 plain text into `extracted_text` and fills an empty `title` from the HTML title.
 Outcomes may also carry `defaults` (applied only where NULL) and derived blobs
 (one row per role, replaced on rerun). `image_meta` reads width and height from
-PNG, GIF, JPEG and WebP headers into `metadata.image_meta` without decoding
-(ADR-0018). No PDF text extraction exists yet. Because
+PNG, GIF, JPEG and WebP headers into `metadata.image_meta` without decoding, and
+`pdf_text` extracts the text layer of PDF originals with pypdf up to 1 MiB and
+2000 pages (ADR-0018); `language` falls back to extracted text on reruns, so
+`bag reprocess` after a PDF or page fetch also detects its language. Because
 `search_vector` is a generated column, extraction and language immediately make
 items searchable with the right stemmer. Every capture enqueues all processors
 regardless of kind; the worker log records claim and outcome with job, item, owner

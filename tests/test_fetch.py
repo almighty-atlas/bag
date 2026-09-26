@@ -24,14 +24,13 @@ from bag.processors import PROCESSORS, ProcessorError
 from bag.storage import FileSystemStorage
 from bag.worker import Worker
 from fastapi.testclient import TestClient
-from helpers import drain, runs
+from helpers import PDF, drain, runs
 
 PAGE = (
     "<html><head><title> Bücher &amp; Kisten </title><script>alert('x')</script>"
     "<style>p{}</style></head><body><h1>Umzug</h1><p>Kisten\tim   Keller.</p>"
     "<noscript>hidden</noscript><p>Zweite&nbsp;Zeile</p></body></html>"
 ).encode()
-PDF = b"%PDF-1.4\n%original\x00\xff\n%%EOF\n"
 LOOPBACK = ipaddress.ip_address("127.0.0.1")
 
 

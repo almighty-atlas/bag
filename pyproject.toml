@@ -12,6 +12,7 @@ dependencies = [
   "pydantic-settings>=2.8,<3",
   "uvicorn>=0.34,<1",
   "argon2-cffi>=23.1,<26",
+  "pypdf>=5.0,<7",
 ]
 
 [project.scripts]

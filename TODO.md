@@ -13,7 +13,6 @@ collections with filters, and `bag export`.
 
 ## Phase 2 — Processing and search
 
-- [ ] Add a `pdf_text` processor with `pypdf` as decided in ADR-0018.
 
 ## Phase 3 — Web / PWA
 

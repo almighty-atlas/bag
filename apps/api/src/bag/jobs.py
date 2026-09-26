@@ -166,7 +166,7 @@ def claim(conn: psycopg.Connection[Row], worker_id: str, lease_seconds: int) -> 
 
 def load_item(conn: psycopg.Connection[Row], job: ClaimedJob) -> ProcessingItem | None:
     row = conn.execute(
-        "SELECT i.id, i.owner_id, i.kind, i.mime_type, i.content, i.metadata, "
+        "SELECT i.id, i.owner_id, i.kind, i.mime_type, i.content, i.metadata, i.extracted_text, "
         "b.sha256, b.size_bytes, b.storage_key FROM item i LEFT JOIN blob b "
         "ON (b.owner_id = i.owner_id AND b.item_id = i.id AND b.role = 'original') "
         "WHERE i.owner_id = %s AND i.id = %s ORDER BY b.created_at, b.id LIMIT 1",
@@ -185,6 +185,7 @@ def load_item(conn: psycopg.Connection[Row], job: ClaimedJob) -> ProcessingItem 
         content=row["content"],
         original=original,
         metadata=row["metadata"],
+        extracted_text=row["extracted_text"],
     )
 
 

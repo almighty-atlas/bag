@@ -28,6 +28,7 @@ class ProcessingItem:
     content: str | None
     original: StoredBlob | None
     metadata: dict[str, Any] = field(default_factory=dict)
+    extracted_text: str | None = None
 
 
 @dataclass(frozen=True)

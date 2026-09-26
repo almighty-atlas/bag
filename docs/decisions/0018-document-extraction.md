@@ -16,11 +16,11 @@ put data safety and a simple architecture above enrichment breadth.
 WebP originals with a hand-written header parser (no decoding, no dependency)
 and stores them in `metadata.image_meta`; anything else is skipped. Basic file
 metadata (size, hash, MIME) already lives on the item and blob rows, so no
-separate `metadata` processor is added. PDF text extraction is deferred: when
-it is added it will be a `pdf_text` processor using the pure-Python `pypdf`
-library, bounded by the same 1 MiB extraction limit and failing per item, never
-per worker. OCR stays out of scope until the basic pipeline has run in
-production.
+separate `metadata` processor is added. PDF text extraction is a `pdf_text`
+processor using the pure-Python `pypdf` library, bounded by the same 1 MiB
+extraction limit and 2000 pages, failing per item (unparseable files are a
+permanent `failed` run, encrypted ones a `skipped` run), never per worker. OCR
+stays out of scope until the basic pipeline has run in production.
 
 ## Consequences
 

@@ -12,9 +12,9 @@ from bag.db import connection
 from bag.ids import uuid7
 from bag.storage import StorageError
 from fastapi.testclient import TestClient
+from helpers import PDF
 
 pytestmark = pytest.mark.integration
-PDF = b"%PDF-1.4\n%original\x00\xff\n%%EOF\n"
 
 
 def test_storage_failure_does_not_acknowledge_or_insert(
