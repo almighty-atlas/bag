@@ -1,6 +1,6 @@
 # AGENTS.md — Working rules for Bag of Holding
 
-Read this before changing anything. The product and architecture specification is in [`docs/spec.md`](docs/spec.md). Outstanding work is in [`TODO.md`](TODO.md).
+Read this before changing anything. The product and architecture specification is in [`docs/spec.md`](docs/spec.md), and the agreed cross-platform Shelf behavior is in [`docs/concepts/shared-shelf.md`](docs/concepts/shared-shelf.md) (ADR-0020). Outstanding work lives in [`TODO.md`](TODO.md).
 
 ## Project in one paragraph
 
@@ -27,6 +27,9 @@ In this order:
 - Every owned entity carries `owner_id` and every query is scoped by it, even while there is one user.
 - Deletion is soft. Purge and storage garbage collection are explicit background jobs.
 - No Redis, no separate vector database, no microservices in the MVP.
+- "Shelf" means a compact view of **persisted Bag items**, not a second local/temporary store. Captures must never silently expire or be deleted on retrieval.
+- Do not introduce LocalSend integration, peer-to-peer transfer, device pairing or universal clipboard synchronization; the Bag API provides cross-device access.
+- DMS 2.0 is the **first Linux integration to validate**, not an untested hard dependency. macOS and Android reuse the web/PWA initially.
 
 ## How to work
 
@@ -90,6 +93,7 @@ docker compose --env-file .env -f deploy/compose/compose.yaml build
 |---|---|
 | `README.md` | Status, setup, exact commands, basic usage, screenshots when available |
 | `docs/architecture.md` | The architecture as actually built, not as planned |
+| `docs/concepts/shared-shelf.md` | Agreed platform UX, scope boundaries and acceptance criteria |
 | `docs/data-model.md` | Entities, important fields, migration considerations |
 | `docs/capture-pipeline.md` | How every supported input becomes an item |
 | `docs/decisions/` | Short ADRs for meaningful decisions, using the template in that folder |
