@@ -2,7 +2,7 @@
 
 > A self-hosted, capture-first personal memory system. Drop anything in. Organize later. Retrieve by meaning.
 
-**Status:** pre-implementation. Nothing described here exists yet. This document is the target; `docs/architecture.md` will record what is actually built.
+**Status:** target specification. Existing behavior is recorded in `docs/architecture.md`; future work is tracked in `TODO.md`. Not every planned platform interaction is implemented.
 
 This specification is written for the implementing agent (Claude Code, Codex or a human). Working rules, priorities and the definition of done live in [`AGENTS.md`](../AGENTS.md). Outstanding work lives in [`TODO.md`](../TODO.md).
 
@@ -26,6 +26,12 @@ Users should be able to capture:
 The application must not force the user to choose folders, tags, item types or destinations before saving. Capture comes first. Classification and enrichment happen afterwards.
 
 The long-term goal is a private, self-hosted external memory that can answer not only **"Where did I save this?"** but **"What do I know about this?"**
+
+The **Shared Shelf** is a quick view of the **same durably saved Items**, accessible
+from Linux, macOS and phones. It is not a separate temporary staging area:
+capturing to Shelf is capturing to the Bag archive. Details, constraints and
+cross-device acceptance criteria: [`docs/concepts/shared-shelf.md`](concepts/shared-shelf.md)
+and [ADR-0020](decisions/0020-shared-shelf.md).
 
 ## 2. Principles
 
@@ -52,46 +58,51 @@ Do not:
 - silently send personal content to third parties
 - let generated metadata overwrite user input
 - optimize visual polish before capture reliability
+- implement LocalSend integration, a custom peer-to-peer transfer engine, device pairing, universal clipboard synchronization or cross-screen cursor/drag transfer as MVP features
+- introduce a separate expiring Shelf datastore or automatically delete captures after another device opens them
 
 ## 3. User experience
 
 ### 3.1 Linux desktop
 
-Provide a **summonable Bag drop target**: a small window opened via a global shortcut (through the desktop portal) or a tray/launcher entry. The user drags an object onto it or pastes into it.
+The **Bag Shelf** is a small, summonable view of recent saved items with a
+low-friction drop/paste target. Capturing a file, image, URL or text stores it
+through the existing Bag API; the Shelf does not own separate content or
+auto-expiring transfers. A successful save is shown only after durable server
+confirmation. An optional thought can be added after capture.
 
-Supported early inputs: files, images, URLs, plain/rich text where available.
+**First platform to validate:** a DMS 2.0 bar/dock widget with popout on
+Niri/Wayland. It should expose a quick capture target, recent items and
+open/download/copy actions. Evaluate DMS drag-in, popout lifecycle and native
+drag-out with a small prototype **before** committing to DMS as the sole Linux
+runtime. GTK4/libadwaita remains a fallback if needed, with the same API
+contract and no duplicate store. A desktop helper is allowed only for a
+demonstrated OS/Wayland limitation.
 
-After capture, show lightweight feedback:
+Client states: idle, drag hover, uploading, saved, failed/retry. Never block
+on a success modal, silently discard an unsuccessful upload, or claim an
+offline capture was saved remotely. Retried captures use the same
+`client_capture_id`. The existing server remains the single source of truth.
 
-```text
-✓ Saved to Bag
+Wayland is the primary environment. Global shortcuts, dragging payloads into
+a DMS surface, dragging files back out and always-on-top behavior must be
+verified on the actual compositor; do not assume cross-desktop portability or
+introduce insecure workarounds.
 
-Add a thought…
-[                              ]
-```
+### 3.2 macOS desktop
 
-The optional note matters: *why* the user saved something is often more valuable than the content. The capture must already be committed on the server before this prompt appears.
+Use the **existing Bag web/PWA interface** first for capture, recent items,
+search, open and original download. This already offers cross-device access
+without a native macOS daemon. A native menu-bar Shelf or native drag-out is
+a deferred improvement and not an MVP dependency.
 
-States:
+### 3.3 Web / PWA
 
-```text
-Idle       -> Bag icon
-Drag hover -> clearly active target
-Uploading  -> subtle progress state
-Saved      -> short confirmation, non-modal
-Failed     -> actionable retry/error state
-```
-
-Never block the desktop with modal dialogs for successful captures.
-
-**Wayland is the primary display environment.** A permanently visible always-on-top target requires `wlr-layer-shell`, which GNOME does not support. Do not depend on it; the summonable-window approach is the baseline, and a layer-shell variant may be added as an optional enhancement. Document limitations with cross-application drag/drop, clipboard access, positioning or global shortcuts rather than introducing insecure workarounds.
-
-### 3.2 Web / PWA
 
 A responsive interface with:
 
 - global capture/paste action
-- recent-items timeline
+- recent-items timeline (also presented as the compact **Shelf**)
 - search with filters
 - item detail view with original-content open/download
 - notes, tags, collections
@@ -100,56 +111,42 @@ A responsive interface with:
 
 The PWA is also the initial mobile browsing interface.
 
-### 3.3 Mobile
+### 3.4 Mobile
 
-The desired UX is `Share -> Add to Bag`. A shared URL, photo, document or text selection goes to the same Bag API.
+A phone uses its **system Share menu** to place content into Bag and a compact,
+touch-friendly **Shelf screen** (recent items and search) to retrieve it.
+Do not build a floating desktop Shelf or require a native Android app.
 
-- **Phase 1:** responsive PWA for browsing, search, paste/upload.
-- **Phase 2:** thin Share Sheet / Share Target integration that only translates a shared payload (URL, text, image, file) into a capture call.
-- **Phase 3:** a larger native client only if real requirements emerge (offline queue, voice capture, camera workflows, notifications).
+On Android, the installed Bag PWA already declares a Web Share Target for
+URLs, text and files. The current implementation **prefills** the capture UI
+and requires the user to confirm with **"In die Tasche"**; preserve that
+explicit durable-save boundary and test the full flow on a real device. The
+mobile Shelf prioritizes recent items, opening links, copying text and
+downloading or sharing files. Browser upload/paste remains the fallback.
 
-A native app is not an MVP dependency.
+On other phones, including iOS, use the responsive web interface first.
+Native system Share integration is not guaranteed by the PWA on every
+platform; only consider a small native extension if a real usage need is
+demonstrated. No platform maintains its own canonical Shelf database.
 
-### 3.4 Browser extension (post-MVP)
+### 3.5 Browser extension (post-MVP)
 
 Save page, link, selection or image to Bag, each with an optional thought. Uses the same public API as every other client.
 
 ## 4. Architecture
 
 ```text
-                    ┌──────────────────┐
-                    │ Linux Drop Client │
-                    └────────┬─────────┘
-                             │
-       ┌─────────────────────┼─────────────────────┐
-       │                     │                     │
-┌──────▼──────┐      ┌───────▼──────┐      ┌──────▼──────┐
-│ Web / PWA   │      │ Mobile Share │      │ Future      │
-│             │      │ Integration  │      │ Integrations│
-└──────┬──────┘      └───────┬──────┘      └──────┬──────┘
-       │                     │                     │
-       └─────────────────────┼─────────────────────┘
-                             ▼
-                        ┌─────────┐
-                        │ Bag API │
-                        └────┬────┘
-                             │
-               ┌─────────────┼──────────────┐
-               ▼             ▼              ▼
-          PostgreSQL    Object Storage   Job Queue
-          (data, FTS,                    (PostgreSQL
-           jobs)                          table)
-               │                            │
-               │                            ▼
-               │                         Workers
-               │                            │
-               └──────────────┬─────────────┘
-                              ▼
-                     Search / Retrieval
-                              │
-                              ▼
-                     Future AI Layer
+ Linux (DMS feasibility) ─┐
+ macOS (web/PWA) ──────────┼──────> Bag API ──> PostgreSQL + Blob Storage
+ Android (PWA + Share) ───┘             │
+                                       └──────> PostgreSQL Job Queue + Worker
 ```
+
+All platforms access the same saved Bag Items through the existing
+authenticated API. No direct device-to-device channel, duplicate Shelf store,
+new sync infrastructure or extra service is required for Shared Shelf v1.
+An item appears on another device when its feed is refreshed after the
+capture response confirms storage; live push is not promised.
 
 ### 4.1 Technology decisions
 
@@ -163,7 +160,7 @@ These are defaults. The agent may replace a choice for a concrete technical reas
 | Job queue | PostgreSQL-backed (jobs table with `FOR UPDATE SKIP LOCKED`, or a library such as `procrastinate`) | No Redis in the MVP. Jobs are idempotent and retryable |
 | Object storage | Abstraction with filesystem backend (dev) and S3-compatible backend (MinIO, production) | Content-addressed layout, see 5.2 |
 | Web frontend | TypeScript, Vite, Preact or Svelte, PWA | Pick one in an ADR. Prefer small over a large framework |
-| Linux client | GTK4 + libadwaita via PyGObject (recommended) | Native Wayland drag/drop and clipboard. Confirm in an ADR before Phase 4 |
+| Linux desktop | DMS 2.0 prototype on Niri first; GTK4 + libadwaita fallback | Validate Wayland drag/drop and API access before picking a final client implementation; ADR-0020 |
 | Node | 22 LTS | Frontend tooling only |
 | Containers | Docker Compose | See section 13 |
 
@@ -439,18 +436,20 @@ Capture must remain trivial to call from tiny scripts (`curl` with a bearer toke
 
 ## 12. Linux capture client requirements
 
-The client must:
+The client, whether a validated DMS integration or GTK4 fallback, must:
 
-1. authenticate with a bearer token stored in the desktop keyring (Secret Service), never in plain config files
-2. expose a summonable drop target (global shortcut via desktop portal, tray or launcher)
-3. accept drag-and-drop payloads for files, images, URLs and text
-4. accept clipboard/paste capture
-5. upload immediately with a `client_capture_id`
-6. show success or failure feedback without modal dialogs
-7. offer the optional post-capture note after the server has confirmed the capture
-8. queue captures locally and retry when the server is unreachable, using the same `client_capture_id` so retries never duplicate
+1. authenticate securely with a per-client bearer token stored in the desktop keyring (Secret Service), not plain config
+2. expose a summonable Shelf surface with a drop/paste target and recent-items view
+3. accept file/image/URL/text input to the extent validated by the target compositor
+4. upload via existing Bag capture endpoints with stable `client_capture_id` values
+5. show accurate uploading, confirmed-save and error states without success modals
+6. provide open/download/copy access to the stored original via the API; native file drag-out is optional after feasibility validation
+7. offer optional post-capture notes without blocking the initial durable capture
+8. protect unsent captures from silent loss (explicit retry at minimum; add a local retry queue only if the reliability test demonstrates a need)
 
-Functionality takes priority over decoration. The visual metaphor may resemble a small magical bag.
+The first prototype is a small **vertical slice**, not a commitment to build
+every planned feature or a second archive. Behavior must not diverge between
+desktop and web clients. See [Shared Shelf](concepts/shared-shelf.md).
 
 ## 13. Deployment
 
@@ -541,8 +540,9 @@ The first useful release is complete when a user can:
 10. use the responsive UI from a phone
 11. restart and update the stack without losing stored data
 12. export the whole Bag to a directory
+13. retrieve a saved item on macOS or a phone after capturing it on Linux (and vice versa), using the existing server API
 
-**Not required for MVP:** LLM chat, embeddings, semantic search, automated AI organization, a full native mobile app, browser extension or elaborate visual effects.
+**Not required for MVP:** LLM chat, embeddings, semantic search, automated AI organization, native macOS/Android apps, custom P2P transfer, LocalSend integration, a synchronized universal clipboard, live device push, a temporary Shelf datastore, browser extension or elaborate visual effects.
 
 ## 18. Roadmap
 
@@ -568,17 +568,27 @@ Feed, search, item detail, upload and paste, notes, tags, collections, processin
 
 **Exit:** Bag is independently useful from a browser and a phone.
 
-### Phase 4 — Linux experience
+### Phase 4 — Linux Shared Shelf
 
-Drop target, drag and drop, clipboard capture, upload status, post-capture thought, local retry queue, keyring token storage.
+Validate a DMS 2.0 drop/popout prototype on Niri before choosing the final Linux
+client approach; fall back to GTK4 if necessary. Use the existing Bag API for
+capture and recent-items retrieval, with correct success/failure feedback and
+secure token storage. A local retry queue or native drag-out follows measured
+reliability/Wayland needs, not speculation.
 
-**Exit:** dropping something into the Bag is faster than filing it anywhere else.
+**Exit:** dropping an item into Bag on Linux is reliably persisted and the same
+item can be opened/downloaded on macOS through the existing web UI.
 
-### Phase 5 — Mobile sharing
+### Phase 5 — Mobile Shared Shelf
 
-Validate platform approach, smallest Share Sheet or Share Target integration for URLs, text, images and files.
+Test the existing Android PWA Share Target on a real device, improve its compact
+recent-items/search experience and contextual open/copy/download/share actions,
+and verify the complete Linux ↔ macOS ↔ Android capture/retrieval flows. Retain
+browser-upload fallback on unsupported platforms.
 
-**Exit:** common mobile content reaches Bag without opening the web UI.
+**Exit:** common phone content reaches Bag through native Share → Bag where
+supported, and stored items can be retrieved across devices without a new sync
+or peer-transfer service.
 
 ### Phase 6 — Intelligence
 

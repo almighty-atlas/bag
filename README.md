@@ -2,22 +2,30 @@
 
 > A self-hosted, capture-first personal memory system. Drop anything in. Organize later. Retrieve by meaning.
 
-**Status:** Phase 2 complete. Text, URL and file capture, bearer and session
-authentication, durable originals, a leased PostgreSQL job queue, MIME verification,
-text extraction, language detection, SSRF-guarded page fetching, ranked multilingual
-search, tags, collections, trash, purge, garbage collection and export all work. A
-first Preact web UI (login, feed, search, capture, detail, trash) is available; the
-PWA polish, Linux client and mobile sharing follow.
+**Status:** Capture, processing, search, organization, export and the Preact web/PWA
+interface are implemented. A web Share Target exists for Android; device-level
+end-to-end testing and mobile UX polish remain. The Linux desktop integration is
+not yet implemented.
 
 ## What it is
 
 Bag of Holding lets you put files, images, documents, URLs, text and code into one place without choosing folders, tags or types first. Originals are always preserved. Enrichment such as text extraction and search indexing runs afterwards, and AI features are optional and replaceable. The server is the memory; the Linux drop target, web UI and mobile sharing are thin clients of one API.
+
+## Shared Shelf
+
+Bag's **Shelf** is a compact cross-device view of the same durably saved items.
+On Linux a DMS 2.0 integration is the first prototype target; on macOS the existing
+web app is the first client; on Android the PWA is opened from the home screen or
+the system Share menu. There is no separate temporary shelf, device-to-device
+transfer system, LocalSend integration or automatic clipboard synchronization.
+See [the agreed concept](docs/concepts/shared-shelf.md) for workflows and scope.
 
 ## Documents
 
 | File | Purpose |
 |---|---|
 | [`docs/spec.md`](docs/spec.md) | Product vision, architecture, domain model, API, security, roadmap |
+| [`docs/concepts/shared-shelf.md`](docs/concepts/shared-shelf.md) | Agreed cross-device Shelf concept for Linux, macOS and Android; boundaries and rollout |
 | [`AGENTS.md`](AGENTS.md) | Working rules, priorities, conventions and definition of done for coding agents |
 | [`TODO.md`](TODO.md) | Actionable outstanding work, starting with Phase 0 |
 | [`docs/architecture.md`](docs/architecture.md) | The architecture as built |
@@ -307,8 +315,9 @@ docker compose --env-file .env -f deploy/compose/compose.yaml up -d --build bag-
 ```
 
 The app installs as a PWA: a service worker caches the shell and hashed assets so
-the UI opens offline (API data is never cached), and on Android the installed app
-appears in the share sheet. A shared link or text lands in the capture box; shared
+the UI opens offline (API data is never cached). On supported Android browsers,
+the installed app is configured as a share target (device testing is still pending).
+A shared link or text lands in the capture box; shared
 files are parked by the service worker and uploaded when you press "In die
 Tasche", so you can add a thought first. Fetched pages can be previewed inside the
 item view in a sandboxed frame that blocks scripts and every network request.
