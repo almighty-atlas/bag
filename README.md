@@ -459,7 +459,10 @@ The format is versioned (`version: 1`) and documented in
 current user: every object is verified against its hash before anything is
 written, rows are inserted only where their ID is missing (so repeating an import
 changes nothing), and an ID that belongs to another user aborts the import.
-Trashed items stay trashed. Run `bag reprocess` afterwards if the export came from
+Imported `thumbnail` objects are additionally decoded in resource-limited child
+processes; thumbnails that are not valid, decodable WebP thumbnails are left out
+(reported as `invalid_thumbnails`, the originals are unaffected) and come back with
+`bag reprocess`. Trashed items stay trashed. Run `bag reprocess` afterwards if the export came from
 an older version with fewer processors. The export is not a substitute for the
 database dump plus storage archive described below, but it is the portable copy
 you can read without Bag of Holding:

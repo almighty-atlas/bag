@@ -286,15 +286,23 @@ a generic 503; neither original bytes nor filenames enter logs.
 authenticated (token or session), owner-scoped and returns `404` with
 `Cache-Control: no-store` for trashed, foreign, missing, damaged or tampered
 thumbnails, so a client shows its fallback. The body always comes from the
-derived `thumbnail` blob: its hash and size are verified on the open handle and it
-is re-validated as a well-formed WebP made only of image-data chunks (at most
-256 KiB) on every request. Responses carry `image/webp`, `nosniff`, a
+derived `thumbnail` blob. On every request, a `304` included, the object is read
+through the integrity-checked handle (SHA-256 and size) and its WebP structure is
+validated from the headers: one still image (`VP8 `, `VP8L`, or `VP8X` with
+optional `ALPH`), consistent chunk, frame and canvas headers, 1 to 512 px per
+side, at most 256 KiB, and no EXIF, ICC, XMP or animation. A missing, damaged or
+invalid blob is `404` even when `If-None-Match` matches. Responses carry
+`image/webp`, `nosniff`, a
 `default-src 'none'; sandbox` CSP, `Cross-Origin-Resource-Policy: same-origin`,
 `Cache-Control: private, no-cache` and a content-hash `ETag` (`304` on a matching
 `If-None-Match`). The item and listing JSON are unchanged; whether a thumbnail
 exists is visible only through this endpoint and the `thumbnail` processing run
 (`skipped` runs carry `metadata.reason`). Rendering limits and the child process
-are described in ADR-0023; the original is never decoded in the API process.
+are described in ADR-0023; neither the original nor a stored thumbnail is ever
+decoded in the API process. That a thumbnail's pixels decode is established when it
+is written: the renderer decodes its own output in the child, and `bag import`
+checks every imported thumbnail in limited child processes and leaves out invalid
+ones (`invalid_thumbnails` in the counts).
 A rerun replaces the row; the previous object stays until `bag gc`.
 
 Crashes may leave unpublished `.upload-*` files or published objects without a
