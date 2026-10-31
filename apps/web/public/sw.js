@@ -8,44 +8,60 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
+  // Only stale shell caches go; SHARE_CACHE holds unsaved user data and is never swept.
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== VERSION).map((key) => caches.delete(key)))),
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.filter((key) => key !== VERSION && key !== SHARE_CACHE).map((key) => caches.delete(key)))),
   );
   self.clients.claim();
 });
 
+/* Pending shares live in their own cache and must survive app updates (see activate). */
 const SHARE_CACHE = "bag-share";
 
-/* Web Share Target (POST): stash the payload, then let the app upload it with the session. */
+/*
+ * Web Share Target (POST): store the whole share as one batch under /shared/<batch>/,
+ * then let the app save it with the session. File entries are written first and the
+ * meta entry last: a batch without meta was never acknowledged. If storing fails, the
+ * partly written batch is removed and the error surfaces instead of a false redirect.
+ */
 async function stashShare(request) {
   const form = await request.formData();
-  const cache = await caches.open(SHARE_CACHE);
-  const files = form.getAll("files").filter((entry) => entry instanceof File);
-  await Promise.all(
-    files.map((file, index) =>
-      cache.put(
-        `/shared/${index}`,
-        new Response(file, {
-          headers: {
-            "Content-Type": file.type || "application/octet-stream",
-            "X-Bag-Filename": encodeURIComponent(file.name || "shared"),
-            // Identity of this received file: retries reuse its capture key, a new share never does.
-            "X-Bag-Share-Id": crypto.randomUUID(),
-          },
-        }),
-      ),
-    ),
-  );
-  await cache.put("/shared/count", new Response(String(files.length)));
-  // Keep every field separately: the app decides what is the link and what is the note.
-  const params = new URLSearchParams();
-  for (const name of ["url", "title", "text"]) {
+  const fields = { url: [], title: [], text: [] };
+  for (const name of Object.keys(fields)) {
     for (const value of form.getAll(name)) {
-      if (typeof value === "string" && value.trim()) params.append(name, value);
+      if (typeof value === "string" && value.trim()) fields[name].push(value);
     }
   }
-  if (files.length) params.set("files", String(files.length));
-  return Response.redirect(`/#/share?${params}`, 303);
+  const files = form.getAll("files").filter((entry) => entry instanceof File);
+  if (!files.length && !fields.url.length && !fields.title.length && !fields.text.length) {
+    return Response.redirect("/#/", 303);
+  }
+  const batchId = crypto.randomUUID();
+  const stored = files.map((file) => ({
+    id: crypto.randomUUID(),
+    name: file.name || "shared",
+    type: file.type || "application/octet-stream",
+    size: file.size,
+  }));
+  const cache = await caches.open(SHARE_CACHE);
+  const written = [];
+  try {
+    for (const [index, file] of files.entries()) {
+      const path = `/shared/${batchId}/${stored[index].id}`;
+      await cache.put(path, new Response(file, { headers: { "Content-Type": stored[index].type } }));
+      written.push(path);
+    }
+    const meta = { id: batchId, created_at: new Date().toISOString(), ...fields, files: stored };
+    const metaPath = `/shared/${batchId}/meta`;
+    written.push(metaPath);
+    await cache.put(metaPath, new Response(JSON.stringify(meta), { headers: { "Content-Type": "application/json" } }));
+  } catch (error) {
+    await Promise.all(written.map((path) => cache.delete(path).catch(() => false)));
+    throw error;
+  }
+  return Response.redirect(`/#/share?batch=${batchId}`, 303);
 }
 
 self.addEventListener("fetch", (event) => {

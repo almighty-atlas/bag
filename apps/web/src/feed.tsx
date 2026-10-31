@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { ApiError, api, looksLikeUrl, organize, type ItemSummary, type NamedEntry } from "./api";
 import { EMPTY_FILTERS, href, type Filters, type Route } from "./app";
+import { PendingShares, DISCARD_CONFIRMATION } from "./pending";
 import { CaptureKeys, uploadFiles, type PendingFile } from "./retry";
 import type { ShareDraft } from "./share";
+import { discardBatch, remainingFiles, saveBatch, type ShareBatch } from "./share-store";
 
 type Row = ItemSummary & { snippet?: string };
 
@@ -34,42 +36,13 @@ export function describe(item: ItemSummary): string {
   return item.title ?? item.original_filename ?? item.source_url ?? item.user_note ?? item.kind;
 }
 
-/** Files a POST share target stashed in the cache; uploaded once, then forgotten. */
-export async function uploadSharedFiles(note: string | null, keys: CaptureKeys): Promise<number> {
-  if (!("caches" in globalThis)) return 0;
-  const cache = await caches.open("bag-share");
-  const countResponse = await cache.match("/shared/count");
-  const count = Number.parseInt((await countResponse?.text()) ?? "0", 10) || 0;
-  let uploaded = 0;
-  for (let index = 0; index < count; index += 1) {
-    const stored = await cache.match(`/shared/${index}`);
-    if (!stored) continue;
-    const name = decodeURIComponent(stored.headers.get("X-Bag-Filename") ?? "shared");
-    const file = new File([await stored.blob()], name, {
-      type: stored.headers.get("Content-Type") ?? "application/octet-stream",
-    });
-    // The worker tags each received file; equal name, size and type never imply the same file.
-    // Entries stashed by an older worker lack the tag and get a fresh key on every read.
-    const shareId = stored.headers.get("X-Bag-Share-Id");
-    const payload = [shareId === null ? keys.file(file) : `shared:${shareId}`, note];
-    await api.captureFile(file, note, keys.key(...payload));
-    await cache.delete(`/shared/${index}`);
-    keys.confirm(...payload);
-    uploaded += 1;
-  }
-  await cache.delete("/shared/count");
-  return uploaded;
+/** What the capture form starts with: a pending share (stored batch) or only prefilled fields. */
+export interface ShareInput {
+  batch: ShareBatch | null;
+  draft: ShareDraft;
 }
 
-export function Feed({
-  route,
-  prefill,
-  sharedFiles,
-}: {
-  route: Route & { name: "feed" };
-  prefill: ShareDraft | null;
-  sharedFiles: number;
-}) {
+export function Feed({ route, share }: { route: Route & { name: "feed" }; share: ShareInput | null }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [next, setNext] = useState<string | number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -138,9 +111,8 @@ export function Feed({
 
   return (
     <>
-      {!route.trashed && (
-        <Capture onSaved={() => void load(false)} initial={prefill} sharedFiles={sharedFiles} />
-      )}
+      {!route.trashed && <PendingShares exclude={share?.batch?.id ?? null} />}
+      {!route.trashed && <Capture onSaved={() => void load(false)} share={share} />}
       <form class="search" onSubmit={submitSearch} role="search">
         <input
           ref={searchInput}
@@ -241,20 +213,13 @@ export function Feed({
   );
 }
 
-function Capture({
-  onSaved,
-  initial,
-  sharedFiles,
-}: {
-  onSaved: () => void;
-  initial: ShareDraft | null;
-  sharedFiles: number;
-}) {
-  const [text, setText] = useState(initial?.content ?? "");
-  const [pendingShare, setPendingShare] = useState(sharedFiles);
-  const [note, setNote] = useState(initial?.note ?? "");
+function Capture({ onSaved, share }: { onSaved: () => void; share: ShareInput | null }) {
+  const batch = share?.batch ?? null;
+  const [text, setText] = useState(share?.draft.content ?? "");
+  const [pendingShare, setPendingShare] = useState(batch?.files.length ?? 0);
+  const [note, setNote] = useState(share?.draft.note ?? "");
   // Shared titles and texts may span lines, which a single-line input would drop.
-  const [multilineNote] = useState(() => Boolean(initial?.note.includes("\n")));
+  const [multilineNote] = useState(() => Boolean(share?.draft.note.includes("\n")));
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
@@ -282,27 +247,36 @@ function Capture({
     setBusy(true);
     try {
       const userNote = note.trim() || null;
-      let duplicate: string | null = null;
-      const isUrl = looksLikeUrl(content);
-      const payload = isUrl ? ["url", content, userNote] : ["text", text, userNote];
-      if (content) {
-        const key = keys.key(...payload);
-        const result = isUrl ? await api.captureUrl(content, userNote, key) : await api.captureText(text, userNote, key);
-        duplicate = result.duplicate_of;
-      }
-      if (pendingShare) {
-        await uploadSharedFiles(userNote, keys);
+      if (batch) {
+        // The batch keeps its content and unconfirmed files in the cache until all of it is saved.
+        const result = await saveBatch(batch, text, userNote, {
+          text: api.captureText,
+          url: api.captureUrl,
+          file: api.captureFile,
+        });
         setPendingShare(0);
         history.replaceState(null, "", "/#/");
+        finish(result.duplicate);
+        return;
       }
-      // Confirmed only after the whole action: retrying after a failed shared upload replays the text.
-      if (content) keys.confirm(...payload);
-      finish(duplicate);
+      const isUrl = looksLikeUrl(content);
+      const payload = isUrl ? ["url", content, userNote] : ["text", text, userNote];
+      const key = keys.key(...payload);
+      const result = isUrl ? await api.captureUrl(content, userNote, key) : await api.captureText(text, userNote, key);
+      keys.confirm(...payload);
+      finish(result.duplicate_of);
     } catch (failure: unknown) {
+      if (batch) setPendingShare((await remainingFiles(batch)).length);
       fail(failure);
     } finally {
       setBusy(false);
     }
+  };
+
+  const discardShare = async () => {
+    if (!batch || !confirm(DISCARD_CONFIRMATION)) return;
+    await discardBatch(batch);
+    location.hash = "#/";
   };
 
   const sendFiles = async (files: PendingFile[]) => {
@@ -370,9 +344,14 @@ function Capture({
           In die Tasche
         </button>
       </div>
-      {pendingShare > 0 && (
+      {batch && (
         <p class="hint">
-          {pendingShare} geteilte Datei(en) warten. Optional einen Gedanken ergänzen, dann „In die Tasche“.
+          Geteilter Inhalt, noch nicht gespeichert
+          {pendingShare > 0 && <>: {pendingShare} Datei(en) warten</>}. Optional einen Gedanken ergänzen, dann „In die
+          Tasche“.{" "}
+          <button type="button" class="link" disabled={busy} onClick={() => void discardShare()}>
+            Verwerfen
+          </button>
         </p>
       )}
       {pendingFiles.length > 0 && (

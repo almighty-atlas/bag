@@ -27,10 +27,6 @@ Shelf is a view over persisted Bag items, not a second transport/store.
       classification with extra title/text is fixed and covered by a vitest
       test that runs the real `sw.js` on a multipart POST in Node; still open:
       a real-device test and a test in an actual browser service worker.
-- [ ] **Pending share preservation:** replace fixed worker cache slots
-      (/shared/0 and /shared/count) with per-share batches or a safe queue.
-      A second share before confirming the first must not silently destroy
-      either selection. Define explicit discard/recovery feedback and tests.
 - [ ] **Text excerpt in recent feed:** show meaningful bounded text
       previews when no title or note exists; preserve API auth, paging and
       sane truncation for large Unicode input.
@@ -43,6 +39,9 @@ Shelf is a view over persisted Bag items, not a second transport/store.
       interrupted upload, auth expiry, server restart and accurate success,
       including that retrying an unanswered text/URL/file save (stable client
       retry ID, built and unit-tested) creates no duplicate.
+      Also: two shares in a row, one saved and one discarded, and an app update
+      with unsaved shares (pending share batches are built and unit-tested
+      in Node; no component or device test yet).
 
 **3A done when:** no silent share loss, wrongly categorized URL, false
 save acknowledgement or unintended same-action retry duplicate; text and
