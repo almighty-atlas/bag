@@ -5,6 +5,7 @@ import { Feed } from "./feed";
 import { ItemView } from "./item";
 import { Login } from "./login";
 import { Organize } from "./organize";
+import { SHARE_FIELDS, shareDraft, sharePayload, type SharePayload } from "./share";
 import { Tokens } from "./tokens";
 
 export interface Filters {
@@ -23,7 +24,7 @@ export type Route =
   | { name: "item"; id: string }
   | { name: "organize" }
   | { name: "tokens" }
-  | { name: "share"; text: string; files: number };
+  | { name: "share"; payload: SharePayload; files: number };
 
 export type FeedRoute = Extract<Route, { name: "feed" }>;
 
@@ -40,7 +41,7 @@ export function parseRoute(hash: string): Route {
   if (path === "/organize") return { name: "organize" };
   if (path === "/share") {
     const files = Number.parseInt(params.get("files") ?? "0", 10);
-    return { name: "share", text: params.get("text") ?? "", files: Number.isFinite(files) ? Math.max(files, 0) : 0 };
+    return { name: "share", payload: sharePayload(params), files: Number.isFinite(files) ? Math.max(files, 0) : 0 };
   }
   const date = (key: string) => {
     const value = params.get(key) ?? "";
@@ -60,17 +61,10 @@ export function parseRoute(hash: string): Route {
   };
 }
 
-/** Text a share target handed over via /share?title=&text=&url=, or null. */
-export function sharedText(pathname: string, search: string): string | null {
+/** Hash route for a GET share (/share?title=&text=&url=), so it follows the POST path; else null. */
+export function sharedRoute(pathname: string, search: string): string | null {
   if (pathname !== "/share") return null;
-  const params = new URLSearchParams(search);
-  const url = params.get("url")?.trim() ?? "";
-  const text = params.get("text")?.trim() ?? "";
-  const title = params.get("title")?.trim() ?? "";
-  // Android often puts the URL into "text"; a bare URL is captured as a link.
-  const link = url || (/^https?:\/\/\S+$/i.test(text) ? text : "");
-  const joined = (link ? [link] : [title, text]).filter(Boolean).join("\n");
-  return joined || null;
+  return href({ name: "share", payload: sharePayload(new URLSearchParams(search)), files: 0 });
 }
 
 export function href(route: Route): string {
@@ -79,7 +73,9 @@ export function href(route: Route): string {
   if (route.name === "organize") return "#/organize";
   if (route.name === "share") {
     const params = new URLSearchParams();
-    if (route.text) params.set("text", route.text);
+    for (const name of SHARE_FIELDS) {
+      for (const value of route.payload[name]) params.append(name, value);
+    }
     if (route.files) params.set("files", String(route.files));
     return `#/share?${params}`;
   }
@@ -95,11 +91,10 @@ export function href(route: Route): string {
 
 export function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
-  const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
-  const [shared] = useState<string | null>(() => {
-    const text = sharedText(location.pathname, location.search);
-    if (text !== null) history.replaceState(null, "", "/#/");
-    return text;
+  const [route, setRoute] = useState<Route>(() => {
+    const shared = sharedRoute(location.pathname, location.search);
+    if (shared !== null) history.replaceState(null, "", `/${shared}`);
+    return parseRoute(location.hash);
   });
 
   useEffect(() => {
@@ -146,8 +141,10 @@ export function App() {
         {route.name === "item" && <ItemView id={route.id} />}
         {route.name === "tokens" && <Tokens />}
         {route.name === "organize" && <Organize />}
-        {route.name === "feed" && <Feed route={route} prefill={shared} sharedFiles={0} />}
-        {route.name === "share" && <Feed route={FEED} prefill={route.text || null} sharedFiles={route.files} />}
+        {route.name === "feed" && <Feed route={route} prefill={null} sharedFiles={0} />}
+        {route.name === "share" && (
+          <Feed route={FEED} prefill={shareDraft(route.payload)} sharedFiles={route.files} />
+        )}
       </main>
     </>
   );

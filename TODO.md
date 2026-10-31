@@ -23,9 +23,10 @@ Shelf is a view over persisted Bag items, not a second transport/store.
 ## Phase 3A — Capture reliability and usable retrieval (first)
 
 - [ ] **Android POST Share Target:** reproduce shared URL + title + text,
-      plain text, image and file on a real Android browser/PWA. Ensure URL
-      capture stays URL capture even when the browser sends additional fields.
-      Add a browser-driven POST test (not merely the sharedText helper).
+      plain text, image and file on a real Android browser/PWA. URL
+      classification with extra title/text is fixed and covered by a vitest
+      test that runs the real `sw.js` on a multipart POST in Node; still open:
+      a real-device test and a test in an actual browser service worker.
 - [ ] **Pending share preservation:** replace fixed worker cache slots
       (/shared/0 and /shared/count) with per-share batches or a safe queue.
       A second share before confirming the first must not silently destroy

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { ApiError, api, looksLikeUrl, organize, type ItemSummary, type NamedEntry } from "./api";
 import { EMPTY_FILTERS, href, type Filters, type Route } from "./app";
+import type { ShareDraft } from "./share";
 
 type Row = ItemSummary & { snippet?: string };
 
@@ -60,7 +61,7 @@ export function Feed({
   sharedFiles,
 }: {
   route: Route & { name: "feed" };
-  prefill: string | null;
+  prefill: ShareDraft | null;
   sharedFiles: number;
 }) {
   const [rows, setRows] = useState<Row[]>([]);
@@ -132,7 +133,7 @@ export function Feed({
   return (
     <>
       {!route.trashed && (
-        <Capture onSaved={() => void load(false)} initial={prefill ?? ""} sharedFiles={sharedFiles} />
+        <Capture onSaved={() => void load(false)} initial={prefill} sharedFiles={sharedFiles} />
       )}
       <form class="search" onSubmit={submitSearch} role="search">
         <input
@@ -240,12 +241,14 @@ function Capture({
   sharedFiles,
 }: {
   onSaved: () => void;
-  initial: string;
+  initial: ShareDraft | null;
   sharedFiles: number;
 }) {
-  const [text, setText] = useState(initial);
+  const [text, setText] = useState(initial?.content ?? "");
   const [pendingShare, setPendingShare] = useState(sharedFiles);
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(initial?.note ?? "");
+  // Shared titles and texts may span lines, which a single-line input would drop.
+  const [multilineNote] = useState(() => Boolean(initial?.note.includes("\n")));
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -321,11 +324,20 @@ function Capture({
         onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
       />
       <div class="row">
-        <input
-          placeholder="Ein Gedanke dazu (optional)"
-          value={note}
-          onInput={(e) => setNote((e.target as HTMLInputElement).value)}
-        />
+        {multilineNote ? (
+          <textarea
+            placeholder="Ein Gedanke dazu (optional)"
+            value={note}
+            rows={3}
+            onInput={(e) => setNote((e.target as HTMLTextAreaElement).value)}
+          />
+        ) : (
+          <input
+            placeholder="Ein Gedanke dazu (optional)"
+            value={note}
+            onInput={(e) => setNote((e.target as HTMLInputElement).value)}
+          />
+        )}
         <input
           ref={fileInput}
           type="file"

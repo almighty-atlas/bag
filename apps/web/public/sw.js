@@ -35,11 +35,13 @@ async function stashShare(request) {
     ),
   );
   await cache.put("/shared/count", new Response(String(files.length)));
-  const text = [form.get("url"), form.get("title"), form.get("text")]
-    .filter((part) => typeof part === "string" && part.trim())
-    .join("\n");
+  // Keep every field separately: the app decides what is the link and what is the note.
   const params = new URLSearchParams();
-  if (text) params.set("text", text);
+  for (const name of ["url", "title", "text"]) {
+    for (const value of form.getAll(name)) {
+      if (typeof value === "string" && value.trim()) params.append(name, value);
+    }
+  }
   if (files.length) params.set("files", String(files.length));
   return Response.redirect(`/#/share?${params}`, 303);
 }
