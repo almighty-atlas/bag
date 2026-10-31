@@ -1,8 +1,10 @@
 """Authenticated, owner-scoped delivery of re-encoded thumbnails (ADR-0023).
 
 This is the only place Bag answers with an image inline. The bytes always come
-from the derived `thumbnail` blob, never from an original, and are re-validated
-before every response.
+from the derived `thumbnail` blob, never from an original. Before every response,
+a 304 included, the blob is integrity-checked and its WebP structure and size are
+validated from the headers. Pixel data is never decoded here: that is established
+by the renderer and the import check in a limited child process (ADR-0023).
 """
 
 import logging
@@ -51,16 +53,8 @@ def thumbnail(
         ).fetchone()
     if row is None or row["mime_type"] != OUTPUT_MIME_TYPE or row["size_bytes"] > MAX_OUTPUT_BYTES:
         raise _unavailable()
-    etag = _etag(row["sha256"])
-    # The URL names the item, so the browser may keep the bytes but must ask first: a
-    # trashed item or a regenerated thumbnail must not be served from a stale copy.
-    headers = {
-        "ETag": etag,
-        "Cache-Control": "private, no-cache",
-        "Vary": "Authorization, Cookie",
-    }
-    if _matches(if_none_match, etag):
-        return Response(status_code=304, headers=headers)
+    # The stored object is verified before anything is confirmed, a 304 included: a
+    # missing, damaged or foreign blob must never be revalidated as good.
     blob = StoredBlob(row["sha256"], row["size_bytes"], row["storage_key"])
     try:
         with storage.open_verified(blob) as source:
@@ -72,6 +66,16 @@ def thumbnail(
         # Tampered or foreign bytes (e.g. an altered import) are never sent inline.
         logger.error("thumbnail_invalid", extra={"item_id": item_id, "owner_id": owner_id})
         raise _unavailable()
+    etag = _etag(row["sha256"])
+    # The URL names the item, so the browser may keep the bytes but must ask first: a
+    # trashed item or a regenerated thumbnail must not be served from a stale copy.
+    headers = {
+        "ETag": etag,
+        "Cache-Control": "private, no-cache",
+        "Vary": "Authorization, Cookie",
+    }
+    if _matches(if_none_match, etag):
+        return Response(status_code=304, headers=headers)
     return Response(
         data,
         media_type=OUTPUT_MIME_TYPE,

@@ -1,6 +1,9 @@
 import hashlib
+import io
 import json
+import os
 import shutil
+import subprocess
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -11,7 +14,7 @@ from bag.auth import token_hash
 from bag.cli import reprocess_items
 from bag.config import Settings
 from bag.db import connection
-from bag.export import export_bag
+from bag.export import ExportError, export_bag
 from bag.ids import uuid7
 from bag.imaging import ImageRejected, is_clean_webp, render_thumbnail
 from bag.importer import import_bag
@@ -21,7 +24,7 @@ from bag.sessions import set_password
 from bag.storage import FileSystemStorage
 from bag.worker import Worker
 from fastapi.testclient import TestClient
-from helpers import GIF, JPEG, PDF, PNG, WEBP, drain, encode_image, photo, runs
+from helpers import GIF, JPEG, PDF, PNG, WEBP, drain, encode_image, photo, riff, runs, vp8
 from PIL import Image
 
 pytestmark = pytest.mark.integration
@@ -71,6 +74,48 @@ def object_path(settings: Settings, sha256: str) -> Path:
 
 def thumbnail_url(item_id: str) -> str:
     return f"/api/v1/items/{item_id}/thumbnail"
+
+
+def point_row(
+    settings: Settings, storage: FileSystemStorage, row_id: Any, data: bytes
+) -> tuple[str, str]:
+    """Store `data` and make the blob row describe it exactly; returns (sha256, key)."""
+    stored = storage.put(io.BytesIO(data), len(data) + 1)
+    with connection(settings) as conn:
+        conn.execute(
+            "UPDATE blob SET sha256 = %s, storage_key = %s, size_bytes = %s WHERE id = %s",
+            (stored.sha256, stored.storage_key, stored.size_bytes, row_id),
+        )
+    return stored.sha256, stored.storage_key
+
+
+def reset_row(settings: Settings, row: dict[str, Any]) -> None:
+    with connection(settings) as conn:
+        conn.execute(
+            "UPDATE blob SET sha256 = %s, storage_key = %s, size_bytes = %s, mime_type = %s "
+            "WHERE id = %s",
+            (row["sha256"], row["storage_key"], row["size_bytes"], row["mime_type"], row["id"]),
+        )
+
+
+def forged_thumbnails() -> dict[str, bytes]:
+    """Objects that must never be served or imported as a thumbnail."""
+    return {
+        "html": b"<html><script>alert(1)</script></html>",
+        "png": PNG,
+        "allowed names, junk content": riff((b"VP8 ", bytes(40))),
+        "valid header, garbage pixels": riff((b"VP8 ", vp8(100, 100, os.urandom(300)))),
+        "header claims too wide": riff((b"VP8 ", vp8(513, 64))),
+        "exif chunk": riff((b"VP8 ", vp8(64, 64)), (b"EXIF", b"SECRET")),
+        "oversized real webp": encode_image(photo((513, 100)), "WEBP"),
+        "animated real webp": encode_image(
+            photo((40, 40)),
+            "WEBP",
+            save_all=True,
+            append_images=[Image.new("RGB", (40, 40), (0, 255, 0))],
+            duration=100,
+        ),
+    }
 
 
 def assert_attachment_only(client: TestClient, headers: dict[str, str], item_id: str) -> None:
@@ -470,6 +515,91 @@ def test_tampered_thumbnail_rows_never_serve_foreign_bytes_inline(
     assert client.get(thumbnail_url(html), headers=headers).status_code == 404
 
 
+def test_a_matching_etag_never_confirms_a_missing_damaged_or_tampered_blob(
+    settings: Settings,
+    client: TestClient,
+    headers: dict[str, str],
+    storage: FileSystemStorage,
+    worker: Worker,
+) -> None:
+    item_id = upload(client, headers, "a.png", PNG)
+    drain(worker)
+    (row,) = thumbnail_rows(settings, item_id)
+    etag = f'"{row["sha256"]}"'
+    path = object_path(settings, row["sha256"])
+    good = path.read_bytes()
+
+    def refused(*validators: str) -> None:
+        for validator in validators:
+            response = client.get(
+                thumbnail_url(item_id), headers={**headers, "If-None-Match": validator}
+            )
+            assert response.status_code == 404, validator
+            assert response.json() == {"detail": "Thumbnail not available"}
+            assert (
+                response.headers["cache-control"] == "no-store" and "etag" not in response.headers
+            )
+
+    def confirmed() -> None:
+        response = client.get(thumbnail_url(item_id), headers={**headers, "If-None-Match": etag})
+        assert response.status_code == 304 and response.headers["etag"] == etag
+
+    confirmed()
+
+    path.unlink()  # missing object
+    refused(etag, f"W/{etag}", "*")
+    path.write_bytes(good[:-5] + b"XXXXX")  # same size, wrong bytes
+    refused(etag, "*")
+    path.write_bytes(good[:-1])
+    refused(etag)
+    path.write_bytes(b"")
+    refused(etag)
+    path.write_bytes(good)
+    confirmed()
+
+    original = hashlib.sha256(PNG).hexdigest()
+    row_cases = [
+        ("size_bytes = %s", (row["size_bytes"] + 1,)),
+        ("size_bytes = %s", (row["size_bytes"] - 1,)),
+        ("size_bytes = %s", (imaging.MAX_OUTPUT_BYTES + 1,)),
+        ("mime_type = %s", ("text/html",)),
+        ("mime_type = %s", ("image/png",)),
+        (
+            "sha256 = %s, storage_key = %s",  # consistent, but no such object
+            ("f" * 64, f"{'f' * 2}/{'f' * 2}/{'f' * 64}"),
+        ),
+        (
+            "sha256 = %s, storage_key = %s, size_bytes = %s",
+            (original, f"{original[:2]}/{original[2:4]}/{original}", len(PNG)),
+        ),
+    ]
+    for assignment, values in row_cases:
+        with connection(settings) as conn:
+            conn.execute(
+                f"UPDATE blob SET {assignment} WHERE id = %s",  # noqa: S608 - fixed test SQL
+                (*values, row["id"]),
+            )
+        (tampered,) = thumbnail_rows(settings, item_id)
+        refused(etag, f'"{tampered["sha256"]}"', "*")
+        reset_row(settings, row)
+        confirmed()
+
+    # Objects that a row describes perfectly (hash, size, type) are still not thumbnails.
+    # The endpoint checks structure and size from the headers; undecodable pixel data behind
+    # a plausible header is caught where thumbnails enter (renderer, import), not here.
+    for name, data in forged_thumbnails().items():
+        if name == "valid header, garbage pixels":
+            continue
+        sha256, _ = point_row(settings, storage, row["id"], data)
+        refused(etag, f'"{sha256}"', "*")
+        assert client.get(thumbnail_url(item_id), headers=headers).status_code == 404, name
+        reset_row(settings, row)
+    confirmed()
+    assert client.get(thumbnail_url(item_id), headers=headers).content == good
+    assert client.get(f"/api/v1/items/{item_id}/content", headers=headers).content == PNG
+    assert_attachment_only(client, headers, item_id)
+
+
 def test_reprocessing_replaces_the_thumbnail_without_duplicates_or_orphans(
     settings: Settings,
     client: TestClient,
@@ -576,46 +706,133 @@ def test_export_and_import_carry_thumbnails_and_distrust_them_on_the_way_back(
     assert {row["role"] for row in blobs} == {"original", "thumbnail"}
     assert (target / "objects" / hashlib.sha256(served).hexdigest()).read_bytes() == served
 
-    def wipe() -> None:
-        with connection(settings) as conn:
-            for table in ("job", "processing_run", "relation", "item_tag", "item_collection"):
-                conn.execute(f"DELETE FROM {table}")  # noqa: S608 - fixed table names
-            conn.execute("DELETE FROM blob; DELETE FROM item")
-        shutil.rmtree(settings.storage_path)
-
-    wipe()
-    import_bag(settings, storage, target)
+    wipe(settings)
+    counts = import_bag(settings, storage, target)
+    assert counts["invalid_thumbnails"] == 0 and counts["blobs"] == 2
     assert client.get(thumbnail_url(item_id), headers=headers).content == served
     assert client.get(f"/api/v1/items/{item_id}/content", headers=headers).content == PNG
+    assert import_bag(settings, storage, target)["invalid_thumbnails"] == 0  # idempotent
 
-    # An export edited to carry HTML as the "thumbnail" imports (objects are only hash-checked)
-    # but the endpoint refuses to send it.
-    page = b"<html><script>alert(1)</script></html>"
-    digest = hashlib.sha256(page).hexdigest()
-    thumb_digest = hashlib.sha256(served).hexdigest()
-    (target / "objects" / thumb_digest).unlink()
-    (target / "objects" / digest).write_bytes(page)
+
+def wipe(settings: Settings) -> None:
+    with connection(settings) as conn:
+        for table in ("job", "processing_run", "relation", "item_tag", "item_collection"):
+            conn.execute(f"DELETE FROM {table}")  # noqa: S608 - fixed table names
+        conn.execute("DELETE FROM blob; DELETE FROM item")
+    shutil.rmtree(settings.storage_path)
+
+
+@pytest.mark.parametrize("name", sorted(forged_thumbnails()))
+def test_import_drops_forged_thumbnails_and_keeps_everything_else(
+    name: str,
+    settings: Settings,
+    client: TestClient,
+    headers: dict[str, str],
+    storage: FileSystemStorage,
+    worker: Worker,
+    tmp_path: Path,
+) -> None:
+    item_id = upload(client, headers, "a.png", PNG)
+    other = upload(client, headers, "b.jpg", JPEG, "image/jpeg")
+    drain(worker)
+    served = client.get(thumbnail_url(other), headers=headers).content
+    target = tmp_path / "export"
+    export_bag(settings, storage, target)
+    blobs = [json.loads(line) for line in (target / "blobs.jsonl").read_text().splitlines()]
+    (genuine,) = [b for b in blobs if b["role"] == "thumbnail" and b["item_id"] == item_id]
+    forged = forged_thumbnails()[name]
+    digest = hashlib.sha256(forged).hexdigest()
+    (target / "objects" / digest).write_bytes(forged)
     edited = [
         {
-            **row,
+            **blob,
             "sha256": digest,
             "storage_key": f"{digest[:2]}/{digest[2:4]}/{digest}",
-            "size_bytes": len(page),
+            "size_bytes": len(forged),
         }
-        if row["role"] == "thumbnail"
-        else row
-        for row in blobs
+        if blob["id"] == genuine["id"]
+        else blob
+        for blob in blobs
     ]
     (target / "blobs.jsonl").write_text("".join(json.dumps(row) + "\n" for row in edited))
-    wipe()
-    import_bag(settings, storage, target)
+
+    wipe(settings)
+    counts = import_bag(settings, storage, target)
+    assert counts["invalid_thumbnails"] == 1 and counts["blobs"] == 3 and counts["items"] == 2
+    assert thumbnail_rows(settings, item_id) == []
     response = client.get(thumbnail_url(item_id), headers=headers)
-    assert response.status_code == 404 and page not in response.content
+    assert response.status_code == 404 and forged not in response.content
+    # The originals and the other item's genuine thumbnail came through untouched.
     assert client.get(f"/api/v1/items/{item_id}/content", headers=headers).content == PNG
-    # Reprocessing restores a genuine thumbnail.
-    client.post(f"/api/v1/items/{item_id}/reprocess", headers=headers)
+    assert client.get(thumbnail_url(other), headers=headers).content == served
+    if name != "png":  # the original image is the same object
+        assert digest not in objects(settings)  # a rejected object is not even stored
+    # A rerun restores a genuine thumbnail for the item that lost it.
+    assert client.post(f"/api/v1/items/{item_id}/reprocess", headers=headers).status_code == 202
     drain(worker)
-    assert client.get(thumbnail_url(item_id), headers=headers).content == served
+    assert client.get(thumbnail_url(item_id), headers=headers).content == render_thumbnail(PNG)
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [("mime_type", "text/html"), ("mime_type", "image/png"), ("size_bytes", 1), ("role", None)],
+)
+def test_import_distrusts_thumbnail_rows_that_misdescribe_their_object(
+    column: str,
+    value: Any,
+    settings: Settings,
+    client: TestClient,
+    headers: dict[str, str],
+    storage: FileSystemStorage,
+    worker: Worker,
+    tmp_path: Path,
+) -> None:
+    item_id = upload(client, headers, "a.png", PNG)
+    drain(worker)
+    target = tmp_path / "export"
+    export_bag(settings, storage, target)
+    blobs = [json.loads(line) for line in (target / "blobs.jsonl").read_text().splitlines()]
+    edited = [
+        {**blob, column: value} if blob["role"] == "thumbnail" and value is not None else blob
+        for blob in blobs
+    ]
+    (target / "blobs.jsonl").write_text("".join(json.dumps(row) + "\n" for row in edited))
+    wipe(settings)
+    counts = import_bag(settings, storage, target)
+    if value is None:  # control: an untouched export imports its thumbnail
+        assert counts["invalid_thumbnails"] == 0 and len(thumbnail_rows(settings, item_id)) == 1
+    else:
+        assert counts["invalid_thumbnails"] == 1 and thumbnail_rows(settings, item_id) == []
+        assert client.get(thumbnail_url(item_id), headers=headers).status_code == 404
+    assert client.get(f"/api/v1/items/{item_id}/content", headers=headers).content == PNG
+
+
+def test_a_missing_verifier_aborts_the_import_before_anything_is_written(
+    settings: Settings,
+    client: TestClient,
+    headers: dict[str, str],
+    storage: FileSystemStorage,
+    worker: Worker,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    upload(client, headers, "a.png", PNG)
+    drain(worker)
+    target = tmp_path / "export"
+    export_bag(settings, storage, target)
+    wipe(settings)
+
+    def cannot_start(*args: Any, **kwargs: Any) -> Any:
+        raise OSError("fork failed")
+
+    monkeypatch.setattr(subprocess, "run", cannot_start)
+    with pytest.raises(ExportError, match="thumbnail verifier"):
+        import_bag(settings, storage, target)
+    with connection(settings) as conn:
+        assert conn.execute("SELECT count(*) AS n FROM item").fetchone() == {"n": 0}
+        assert conn.execute("SELECT count(*) AS n FROM blob").fetchone() == {"n": 0}
+    monkeypatch.undo()
+    assert import_bag(settings, storage, target)["items"] == 1
 
 
 def test_existing_features_keep_working_next_to_thumbnails(

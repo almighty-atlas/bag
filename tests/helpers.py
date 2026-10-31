@@ -1,4 +1,5 @@
 import io
+import struct
 from typing import Any
 
 from bag.worker import Worker
@@ -67,3 +68,20 @@ def runs(client: TestClient, headers: dict[str, str], item_id: str) -> dict[str,
     response = client.get(f"/api/v1/items/{item_id}/processing", headers=headers)
     assert response.status_code == 200, response.text
     return {row["processor"]: row for row in response.json()}
+
+
+def riff(*chunks: tuple[bytes, bytes], size_delta: int = 0) -> bytes:
+    """A RIFF/WebP container around the given (type, payload) chunks, padded as required."""
+    body = b"WEBP"
+    for name, payload in chunks:
+        body += name + struct.pack("<I", len(payload)) + payload + (b"\0" * (len(payload) & 1))
+    return b"RIFF" + struct.pack("<I", len(body) + size_delta) + body
+
+
+def vp8(
+    width: int, height: int, filler: bytes = bytes(64), scale: int = 0, partition: int = 4
+) -> bytes:
+    """A lossy key-frame header claiming the size, followed by filler instead of pixel data."""
+    tag = (1 << 4) | (partition << 5)  # key frame, profile 0, shown
+    dims = struct.pack("<HH", width | scale << 14, height)
+    return tag.to_bytes(3, "little") + b"\x9d\x01\x2a" + dims + filler

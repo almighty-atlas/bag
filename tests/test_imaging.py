@@ -1,4 +1,5 @@
 import io
+import os
 import struct
 import subprocess
 import sys
@@ -12,12 +13,15 @@ from bag.imaging import (
     MAX_OUTPUT_BYTES,
     THUMBNAIL_EDGE,
     ImageRejected,
+    decodes,
     is_clean_webp,
     render_isolated,
     render_thumbnail,
+    verify_isolated,
     webp_chunks,
+    webp_size,
 )
-from helpers import GIF, JPEG, PDF, PNG, WEBP, encode_image, photo
+from helpers import GIF, JPEG, PDF, PNG, WEBP, encode_image, photo, riff, vp8
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
@@ -361,3 +365,206 @@ def test_child_limits_are_set_before_reading_input(tmp_path: Path) -> None:
         str(imaging.CHILD_CPU_SECONDS),
         "0",
     ]
+
+
+def vp8l(width: int, height: int, version: int = 0) -> bytes:
+    bits = (width - 1) | (height - 1) << 14 | version << 29
+    return b"\x2f" + bits.to_bytes(4, "little") + bytes(32)
+
+
+def vp8x(flags: int, width: int, height: int, reserved: bytes = b"\0\0\0") -> bytes:
+    canvas = (width - 1).to_bytes(3, "little") + (height - 1).to_bytes(3, "little")
+    return bytes([flags]) + reserved + canvas
+
+
+GENUINE = {
+    "rgb": render_thumbnail(PNG),
+    "rgba": render_thumbnail(encode_image(Image.new("RGBA", (900, 300), (5, 6, 7, 8)), "PNG")),
+    "lossless": encode_image(Image.new("RGBA", (40, 30), (1, 2, 3, 4)), "WEBP", lossless=True),
+}
+
+
+@pytest.mark.parametrize(("name", "size"), [("rgb", (512, 341)), ("rgba", (512, 171))])
+def test_genuine_thumbnails_pass_every_check(name: str, size: tuple[int, int]) -> None:
+    data = GENUINE[name]
+    assert webp_size(data) == size and decodes(data) and is_clean_webp(data)
+    assert verify_isolated([data]) == [True]
+
+
+def test_lossless_thumbnail_shaped_files_are_accepted_too() -> None:
+    assert webp_size(GENUINE["lossless"]) == (40, 30) and decodes(GENUINE["lossless"])
+
+
+def forged_containers() -> dict[str, bytes]:
+    """Containers whose chunk names are allowed but whose content is not a thumbnail."""
+    alph = (b"ALPH", b"\x00" + bytes(16))
+    image = (b"VP8 ", vp8(64, 64))
+    return {
+        "zero filled VP8": riff((b"VP8 ", bytes(40))),
+        "VP8 without start code": riff((b"VP8 ", b"\x10\x00\x00" + b"\x00\x00\x00" + bytes(40))),
+        "VP8 inter frame": riff((b"VP8 ", bytes([0x11 | 1, 0, 0]) + vp8(64, 64)[3:])),
+        "VP8 hidden frame": riff((b"VP8 ", bytes([4 << 5 | 0, 0, 0]) + vp8(64, 64)[3:])),
+        "VP8 partition beyond chunk": riff((b"VP8 ", vp8(64, 64, partition=1000))),
+        "VP8 too wide": riff((b"VP8 ", vp8(513, 64))),
+        "VP8 too tall": riff((b"VP8 ", vp8(64, 513))),
+        "VP8 huge": riff((b"VP8 ", vp8(16_383, 16_383))),
+        "VP8 zero width": riff((b"VP8 ", vp8(0, 64))),
+        "VP8 zero height": riff((b"VP8 ", vp8(64, 0))),
+        "VP8 upscale hint": riff((b"VP8 ", vp8(64, 64, scale=1))),
+        "VP8 only a header": riff((b"VP8 ", vp8(64, 64)[:8])),
+        "VP8L bad signature": riff((b"VP8L", b"\x00" + vp8l(64, 64)[1:])),
+        "VP8L too wide": riff((b"VP8L", vp8l(513, 64))),
+        "VP8L too tall": riff((b"VP8L", vp8l(64, 4096))),
+        "VP8L future version": riff((b"VP8L", vp8l(64, 64, version=1))),
+        "VP8L empty": riff((b"VP8L", b"")),
+        "VP8X exif flag": riff((b"VP8X", vp8x(0x08, 64, 64)), image),
+        "VP8X xmp flag": riff((b"VP8X", vp8x(0x04, 64, 64)), image),
+        "VP8X icc flag": riff((b"VP8X", vp8x(0x20, 64, 64)), image),
+        "VP8X animation flag": riff((b"VP8X", vp8x(0x02, 64, 64)), image),
+        "VP8X reserved flag": riff((b"VP8X", vp8x(0x01, 64, 64)), image),
+        "VP8X reserved bytes": riff((b"VP8X", vp8x(0, 64, 64, b"\0\0\1")), image),
+        "VP8X short": riff((b"VP8X", vp8x(0, 64, 64)[:9]), image),
+        "VP8X canvas differs from frame": riff((b"VP8X", vp8x(0, 128, 64)), image),
+        "VP8X canvas too large": riff((b"VP8X", vp8x(0, 4096, 4096)), (b"VP8 ", vp8(4096, 4096))),
+        "VP8X alpha flag without ALPH": riff((b"VP8X", vp8x(0x10, 64, 64)), image),
+        "ALPH without alpha flag": riff((b"VP8X", vp8x(0, 64, 64)), alph, image),
+        "ALPH without VP8X": riff(alph, image),
+        "ALPH reserved bits": riff(
+            (b"VP8X", vp8x(0x10, 64, 64)), (b"ALPH", b"\xc0" + bytes(16)), image
+        ),
+        "ALPH unknown compression": riff(
+            (b"VP8X", vp8x(0x10, 64, 64)), (b"ALPH", b"\x03" + bytes(16)), image
+        ),
+        "VP8X alone": riff((b"VP8X", vp8x(0, 64, 64))),
+        "two frames": riff(image, image),
+        "frame then EXIF": riff(image, (b"EXIF", b"SECRET")),
+        "ICC before frame": riff((b"VP8X", vp8x(0, 64, 64)), (b"ICCP", b"SECRET"), image),
+        "unknown chunk": riff((b"VP8X", vp8x(0, 64, 64)), (b"JUNK", b"x"), image),
+        "no chunks": riff(),
+        "RIFF size too large": riff(image, size_delta=8),
+        "RIFF size too small": riff(image, size_delta=-2),
+        "trailing byte": riff(image) + b"\0",
+        "truncated": riff(image)[:-3],
+    }
+
+
+@pytest.mark.parametrize("name", sorted(forged_containers()))
+def test_forged_riff_containers_are_not_thumbnails(name: str) -> None:
+    data = forged_containers()[name]
+    assert webp_size(data) is None and not is_clean_webp(data) and not decodes(data), name
+    assert verify_isolated([data]) == [False]
+
+
+def test_nonzero_padding_byte_is_rejected() -> None:
+    data = bytearray(riff((b"VP8 ", vp8(64, 64, bytes(23)))))  # odd chunk size: one pad byte
+    assert data[-1] == 0 and webp_size(bytes(data)) == (64, 64)
+    data[-1] = 1
+    assert webp_size(bytes(data)) is None
+
+
+def test_plausible_headers_with_garbage_pixels_pass_headers_but_never_decode() -> None:
+    # What the cheap header check alone cannot see: the decoder check refuses these.
+    for filler in (bytes(200), os.urandom(200), b"\xff" * 200):
+        data = riff((b"VP8 ", vp8(100, 100, filler)))
+        assert webp_size(data) == (100, 100)
+        assert not decodes(data)
+        assert verify_isolated([data]) == [False]
+        with pytest.raises(OSError):  # Pillow independently refuses the file
+            decode(data)
+
+
+def test_a_header_that_claims_another_size_than_the_pixels_never_decodes() -> None:
+    real = imaging._webp_parts(GENUINE["rgb"])
+    assert real is not None
+    payload = bytearray(real[0][1])
+    payload[6:10] = struct.pack("<HH", 300, 200)  # 512 x 341 pixel data under a 300 x 200 header
+    data = riff((b"VP8 ", bytes(payload)))
+    assert webp_size(data) == (300, 200) and not decodes(data)
+
+
+def test_a_valid_but_oversized_webp_is_not_a_thumbnail() -> None:
+    big = encode_image(photo((513, 100)), "WEBP")
+    assert decode(big).size == (513, 100) and webp_size(big) is None and not decodes(big)
+    noise = encode_image(
+        Image.frombytes("RGB", (512, 512), os.urandom(512 * 512 * 3)), "WEBP", lossless=True
+    )
+    assert len(noise) > MAX_OUTPUT_BYTES and webp_size(noise) is None
+    assert verify_isolated([big, noise]) == [False, False]
+
+
+def test_verify_isolated_keeps_order_and_batches(monkeypatch: pytest.MonkeyPatch) -> None:
+    good, junk = GENUINE["rgb"], riff((b"VP8 ", vp8(100, 100)))
+    candidates = [good, junk, b"", PNG, GENUINE["rgba"], good]
+    expected = [True, False, False, False, True, True]
+    assert verify_isolated(candidates) == expected
+    assert verify_isolated([]) == []
+    monkeypatch.setattr(imaging, "VERIFY_BATCH", 2)
+    assert verify_isolated(candidates) == expected
+
+
+def test_a_failing_batch_is_retried_one_by_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    real = imaging._verify_batch
+    sizes: list[int] = []
+
+    def flaky(batch: Any) -> Any:
+        sizes.append(len(batch))
+        return None if len(batch) > 1 else real(batch)
+
+    monkeypatch.setattr(imaging, "_verify_batch", flaky)
+    good, junk = GENUINE["rgb"], riff((b"VP8 ", vp8(100, 100)))
+    assert verify_isolated([good, junk, good]) == [True, False, True]
+    assert sizes == [3, 1, 1, 1]
+
+
+def test_a_crashing_or_hanging_verifier_condemns_only_its_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def killed(*args: Any, **kwargs: Any) -> Any:
+        return subprocess.CompletedProcess(args, -11)
+
+    monkeypatch.setattr(subprocess, "run", killed)
+    assert verify_isolated([GENUINE["rgb"], GENUINE["rgb"]]) == [False, False]
+
+    def hang(*args: Any, **kwargs: Any) -> Any:
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", hang)
+    assert verify_isolated([GENUINE["rgb"]]) == [False]
+
+    def cannot_start(*args: Any, **kwargs: Any) -> Any:
+        raise OSError("fork failed")
+
+    monkeypatch.setattr(subprocess, "run", cannot_start)
+    with pytest.raises(OSError, match="fork failed"):
+        verify_isolated([GENUINE["rgb"]])
+
+
+def test_the_verify_child_refuses_malformed_input_and_unknown_modes() -> None:
+    def child(*args: str, stdin: bytes) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run(  # noqa: S603 - fixed argv
+            [sys.executable, "-I", "-m", "bag.imaging", *args],
+            input=stdin,
+            capture_output=True,
+            env={},
+            timeout=60,
+            check=False,
+        )
+
+    good = GENUINE["rgb"]
+    ok = child("verify", stdin=struct.pack(">I", len(good)) + good)
+    assert ok.returncode == 0 and ok.stdout == b"1"
+    for stdin in (
+        b"\x00\x00",  # truncated length
+        struct.pack(">I", MAX_OUTPUT_BYTES + 1) + bytes(MAX_OUTPUT_BYTES + 1),  # over the limit
+        struct.pack(">I", 100) + b"short",  # length beyond the data
+    ):
+        refused = child("verify", stdin=stdin)
+        assert refused.returncode == imaging.EXIT_CORRUPT and refused.stdout == b""
+    assert child("shell", stdin=b"").returncode == 2
+
+
+def test_generated_thumbnails_come_out_of_the_renderer_already_verified() -> None:
+    # `_encode` refuses output the strict check would later reject.
+    for data in (PNG, JPEG, WEBP, GIF):
+        out = render_thumbnail(data)
+        assert webp_size(out) is not None and decodes(out)

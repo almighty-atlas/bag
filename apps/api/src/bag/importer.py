@@ -13,6 +13,7 @@ from bag.config import Settings
 from bag.db import Row, connection
 from bag.export import FORMAT_VERSION, ExportError
 from bag.ids import uuid7
+from bag.imaging import MAX_OUTPUT_BYTES, OUTPUT_MIME_TYPE, verify_isolated
 from bag.storage import FileSystemStorage, chunks
 from bag.tokens import resolve_owner
 
@@ -57,6 +58,42 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _screen_thumbnails(
+    source: Path, blobs: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], int]:
+    """Drop `thumbnail` rows that are not valid, decodable thumbnails.
+
+    An export directory is untrusted input: a matching hash only proves the object is
+    the one the row names, not that it is an image. Thumbnails are derived and
+    regenerable (`bag reprocess`), so an invalid one is left out instead of failing
+    the import; the originals are unaffected. Decoding happens in limited child
+    processes (ADR-0023), once per distinct object.
+    """
+    digests = sorted({str(blob["sha256"]) for blob in blobs if blob.get("role") == "thumbnail"})
+    if not digests:
+        return blobs, 0
+    payloads: dict[str, bytes] = {}
+    for digest in digests:
+        path = source / "objects" / digest
+        payloads[digest] = path.read_bytes() if path.stat().st_size <= MAX_OUTPUT_BYTES else b""
+    try:
+        verdicts = verify_isolated([payloads[digest] for digest in digests])
+    except OSError as exc:
+        raise ExportError("The thumbnail verifier could not be started") from exc
+    valid = {digest for digest, ok in zip(digests, verdicts, strict=True) if ok}
+    kept = [
+        blob
+        for blob in blobs
+        if blob.get("role") != "thumbnail"
+        or (
+            str(blob["sha256"]) in valid
+            and blob.get("mime_type") == OUTPUT_MIME_TYPE
+            and blob.get("size_bytes") == len(payloads[str(blob["sha256"])])
+        )
+    ]
+    return kept, len(blobs) - len(kept)
+
+
 def _inserted(conn: psycopg.Connection[Row], sql: str, params: dict[str, Any]) -> bool:
     return conn.execute(sql + " ON CONFLICT DO NOTHING RETURNING 1", params).fetchone() is not None
 
@@ -85,9 +122,21 @@ def import_bag(
         path = source / "objects" / str(blob["sha256"])
         if not path.is_file() or _sha256(path) != blob["sha256"]:
             raise ExportError(f"Object {blob['sha256'][:12]}… is missing or corrupt")
+    blobs, invalid_thumbnails = _screen_thumbnails(source, blobs)
     counts = dict.fromkeys(
-        ("items", "blobs", "tags", "collections", "relations", "processing_runs", "objects"), 0
+        (
+            "items",
+            "blobs",
+            "tags",
+            "collections",
+            "relations",
+            "processing_runs",
+            "objects",
+            "invalid_thumbnails",
+        ),
+        0,
     )
+    counts["invalid_thumbnails"] = invalid_thumbnails
     stored: set[str] = set()
     for blob in blobs:
         if blob["sha256"] in stored:
