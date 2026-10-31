@@ -15,6 +15,8 @@ export interface ItemSummary {
   tags: string[];
   collections: string[];
   processing_status: string;
+  /** A stored preview exists to try; a hint only, loading it can still fail (see thumbnail.tsx). */
+  thumbnail_available: boolean;
   created_at: string;
   captured_at: string;
   updated_at: string;
@@ -37,6 +39,7 @@ export interface ItemDetail {
   tags: string[];
   collections: string[];
   processing_status: string;
+  thumbnail_available: boolean;
   created_at: string;
   captured_at: string;
   updated_at: string;
@@ -174,6 +177,8 @@ export const organize = {
 };
 
 export const contentUrl = (id: string): string => `/api/v1/items/${encodeURIComponent(id)}/content`;
+/** The only URL an image preview may load: a re-encoded WebP, never the original (ADR-0023). */
+export const thumbnailUrl = (id: string): string => `/api/v1/items/${encodeURIComponent(id)}/thumbnail`;
 export const snapshotUrl = (id: string): string => `/api/v1/items/${encodeURIComponent(id)}/snapshot`;
 
 /** Absolute http(s) URL on a single line: capture it as a link instead of text. */

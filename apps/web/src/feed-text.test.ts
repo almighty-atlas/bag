@@ -17,6 +17,7 @@ const item = (fields: Partial<ItemSummary> & { snippet?: string }): ItemSummary 
   tags: [],
   collections: [],
   processing_status: "ready",
+  thumbnail_available: false,
   created_at: "2026-10-31T10:00:00Z",
   captured_at: "2026-10-31T10:00:00Z",
   updated_at: "2026-10-31T10:00:00Z",

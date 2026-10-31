@@ -1,6 +1,11 @@
 import { useEffect, useState } from "preact/hooks";
 
 import { ApiError, api, contentUrl, snapshotUrl, type ItemDetail, type ProcessingRun } from "./api";
+import { Thumbnail, previewState, thumbnailAlt } from "./thumbnail";
+
+/** A preview that is still being made is looked up again a few times, then left to a reload. */
+export const PREVIEW_POLL_MS = 4000;
+export const PREVIEW_POLL_LIMIT = 15;
 
 /** Snapshot HTML with a policy that blocks every network load and script before the page's own head. */
 export function sandboxedDocument(html: string): string {
@@ -65,6 +70,32 @@ export function ItemView({ id }: { id: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  const imageState = item ? previewState(item, { run: runs.find((run) => run.processor === "thumbnail") }) : "none";
+
+  useEffect(() => {
+    if (imageState !== "pending") return;
+    let current = true;
+    let polls = 0;
+    const timer = setInterval(() => {
+      polls += 1;
+      if (polls >= PREVIEW_POLL_LIMIT) clearInterval(timer);
+      // Only the preview's inputs change: the edit form keeps whatever is being typed.
+      Promise.all([api.item(id), api.processing(id)])
+        .then(([detail, processing]) => {
+          if (!current) return;
+          setRuns(processing);
+          setItem((old) =>
+            old && { ...old, thumbnail_available: detail.thumbnail_available, processing_status: detail.processing_status },
+          );
+        })
+        .catch(() => undefined);
+    }, PREVIEW_POLL_MS);
+    return () => {
+      current = false;
+      clearInterval(timer);
+    };
+  }, [imageState, id]);
+
   if (error) return <p class="error">{error}</p>;
   if (!item) return <p>Lade…</p>;
 
@@ -110,6 +141,11 @@ export function ItemView({ id }: { id: string }) {
         {item.kind} · erfasst {new Date(item.captured_at).toLocaleString()} · Status {item.processing_status}
         {item.language && <> · Sprache {item.language}</>}
       </p>
+      {imageState !== "none" && (
+        <div class="detail-preview">
+          <Thumbnail key={item.id} id={item.id} alt={thumbnailAlt(item)} state={imageState} variant="detail" />
+        </div>
+      )}
       <form class="card" onSubmit={save}>
         <label>
           Titel
