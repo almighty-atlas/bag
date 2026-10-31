@@ -3,6 +3,7 @@ from typing import Any
 
 from bag.worker import Worker
 from fastapi.testclient import TestClient
+from PIL import Image
 from pypdf import PdfWriter
 from pypdf.generic import DictionaryObject, NameObject, StreamObject
 
@@ -33,6 +34,25 @@ def build_pdf(text: str = PDF_TEXT) -> bytes:
 
 PDF = build_pdf()
 BROKEN_PDF = b"%PDF-1.4\n%original\x00\xff\n%%EOF\n"
+
+
+def encode_image(image: Image.Image, fmt: str, **options: Any) -> bytes:
+    buffer = io.BytesIO()
+    image.save(buffer, fmt, **options)
+    return buffer.getvalue()
+
+
+def photo(size: tuple[int, int] = (1200, 800)) -> Image.Image:
+    """A deterministic image whose left half is red and right half blue."""
+    image = Image.new("RGB", size, (220, 20, 20))
+    image.paste((20, 20, 220), (size[0] // 2, 0, size[0], size[1]))
+    return image
+
+
+PNG = encode_image(photo(), "PNG")
+JPEG = encode_image(photo(), "JPEG", quality=90)
+WEBP = encode_image(photo(), "WEBP")
+GIF = encode_image(photo().convert("P"), "GIF")
 
 
 def drain(worker: Worker, limit: int = 100) -> int:
