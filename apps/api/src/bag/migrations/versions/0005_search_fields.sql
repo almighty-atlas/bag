@@ -104,14 +104,16 @@ LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
 $$;
 
 -- Recompute one item after its tags changed. The row lock makes concurrent tag changes on
--- the same item queue up, so the tag list read below is never stale. A vector that would
+-- the same item queue up, so the tag list read below is never stale. It is FOR NO KEY
+-- UPDATE, not FOR UPDATE: the foreign-key checks of concurrent item_tag writes hold FOR KEY
+-- SHARE on the item until commit, and FOR UPDATE would deadlock with them. A vector that would
 -- exceed the PostgreSQL limit drops the extracted text instead of failing the tag change.
 CREATE FUNCTION bag_refresh_item_search(p_owner uuid, p_item uuid) RETURNS void
 LANGUAGE plpgsql AS $$
 DECLARE
     tags tsvector;
 BEGIN
-    PERFORM 1 FROM item WHERE owner_id = p_owner AND id = p_item FOR UPDATE;
+    PERFORM 1 FROM item WHERE owner_id = p_owner AND id = p_item FOR NO KEY UPDATE;
     tags := bag_item_tags_vector(p_owner, p_item);
     BEGIN
         UPDATE item SET search_vector = bag_item_vector(
@@ -171,12 +173,14 @@ BEFORE INSERT OR UPDATE OF title, original_filename, user_note, source_url, extr
     language ON item
 FOR EACH ROW EXECUTE FUNCTION item_search_before();
 
--- Assigning or removing tags: refresh each affected item once per statement.
+-- Assigning or removing tags: refresh each affected item once per statement. Items are
+-- locked in (owner_id, item_id) order, so statements touching several of the same items
+-- cannot deadlock.
 CREATE FUNCTION item_tag_search_changed() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
     PERFORM bag_refresh_item_search(r.owner_id, r.item_id)
-    FROM (SELECT DISTINCT owner_id, item_id FROM changed_rows) r;
+    FROM (SELECT DISTINCT owner_id, item_id FROM changed_rows ORDER BY owner_id, item_id) r;
     RETURN NULL;
 END
 $$;
@@ -191,6 +195,33 @@ AFTER DELETE ON item_tag
 REFERENCING OLD TABLE AS changed_rows
 FOR EACH STATEMENT EXECUTE FUNCTION item_tag_search_changed();
 
+-- Re-pointing an assignment at another tag or item (the application never does, direct SQL
+-- may): refresh the previous and the new item of every assignment whose (owner, item, tag)
+-- changed. Changes to provenance, confidence or timestamps are not searchable and refresh
+-- nothing. The comparison ignores row identity, so it also covers swaps and key changes.
+CREATE FUNCTION item_tag_search_updated() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM bag_refresh_item_search(r.owner_id, r.item_id)
+    FROM (
+        SELECT DISTINCT owner_id, item_id FROM (
+            (SELECT owner_id, item_id, tag_id FROM old_rows
+             EXCEPT ALL SELECT owner_id, item_id, tag_id FROM new_rows)
+            UNION ALL
+            (SELECT owner_id, item_id, tag_id FROM new_rows
+             EXCEPT ALL SELECT owner_id, item_id, tag_id FROM old_rows)
+        ) changed
+        ORDER BY owner_id, item_id
+    ) r;
+    RETURN NULL;
+END
+$$;
+
+CREATE TRIGGER item_tag_search_update
+AFTER UPDATE ON item_tag
+REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows
+FOR EACH STATEMENT EXECUTE FUNCTION item_tag_search_updated();
+
 -- Renaming a tag: refresh the items that carry it, within the tag's owner only.
 CREATE FUNCTION tag_search_renamed() RETURNS trigger
 LANGUAGE plpgsql AS $$
@@ -201,6 +232,7 @@ BEGIN
         FROM new_rows n
         JOIN old_rows o ON (o.id = n.id AND o.name IS DISTINCT FROM n.name)
         JOIN item_tag it ON (it.owner_id = n.owner_id AND it.tag_id = n.id)
+        ORDER BY it.owner_id, it.item_id
     ) r;
     RETURN NULL;
 END

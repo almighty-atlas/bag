@@ -561,6 +561,220 @@ def test_concurrent_tag_assignments_are_all_indexed(
     assert found(client, headers, "erstes zweites") == [item]
 
 
+def _two_owner_setup(
+    settings: Settings, client: TestClient, headers: dict[str, str]
+) -> tuple[dict[str, str], str, str, str, str]:
+    """Items a and b of the first owner, item c of a second owner; all carry tags."""
+    other = add_user(settings, "other")
+    a = text(client, headers, "Eins")
+    b = text(client, headers, "Zwei")
+    c = client.post("/api/v1/capture/text", json={"content": "Drei"}, headers=other).json()["id"]
+    patch(client, headers, a, tags=["alpha"])
+    patch(client, headers, b, tags=["beta"])
+    patch(client, other, c, tags=["alpha"])
+    return other, a, b, c, "alpha"
+
+
+def test_direct_updates_of_an_assignment_reindex_old_and_new_items(
+    settings: Settings, client: TestClient, headers: dict[str, str]
+) -> None:
+    other, a, b, c, _ = _two_owner_setup(settings, client, headers)
+    with connection(settings) as conn:
+        beta = conn.execute("SELECT id FROM tag WHERE name = 'beta'").fetchone()
+        assert beta is not None
+
+    # Moving an assignment to another item: the previous and the new item both follow.
+    with connection(settings) as conn:
+        conn.execute("UPDATE item_tag SET item_id = %s WHERE item_id = %s", (b, a))
+    assert found(client, headers, "alpha") == [b]
+    assert fields(client, headers, "alpha") == {b: ["tag"]}
+    assert found(client, headers, "beta") == [b]
+
+    # Pointing an assignment at another tag: the old name stops matching, the new one matches.
+    patch(client, headers, a, tags=["gamma"])
+    assert found(client, headers, "gamma") == [a]
+    with connection(settings) as conn:
+        conn.execute("UPDATE item_tag SET tag_id = %s WHERE item_id = %s", (beta["id"], a))
+    assert found(client, headers, "gamma") == []
+    assert fields(client, headers, "beta") == {a: ["tag"], b: ["tag"]}
+
+    # Several assignments of two items swapped in one statement.
+    patch(client, headers, a, tags=["alpha", "delta"])
+    patch(client, headers, b, tags=["beta", "epsilon"])
+    with connection(settings) as conn:
+        conn.execute(
+            "UPDATE item_tag SET item_id = CASE WHEN item_id = %s THEN %s::uuid ELSE %s::uuid END "
+            "WHERE item_id IN (%s, %s)",
+            (a, b, a, a, b),
+        )
+    assert found(client, headers, "alpha") == [b] and found(client, headers, "delta") == [b]
+    assert found(client, headers, "beta") == [a] and found(client, headers, "epsilon") == [a]
+
+    # The other owner's index never changes, nor is it consulted.
+    assert found(client, other, "alpha") == [c]
+    assert found(client, other, "beta") == [] and found(client, other, "delta") == []
+
+
+def test_unrelated_assignment_updates_do_not_reindex(
+    settings: Settings, client: TestClient, headers: dict[str, str]
+) -> None:
+    other, a, b, c, _ = _two_owner_setup(settings, client, headers)
+    sentinel = "'sentinel':1"
+    with connection(settings) as conn:
+        conn.execute("UPDATE item SET search_vector = %s::tsvector", (sentinel,))
+        # Provenance, confidence and timestamps are not searchable.
+        conn.execute("UPDATE item_tag SET created_by = 'ai', confidence = 0.3, created_at = now()")
+        # A statement that changes no row.
+        conn.execute("UPDATE item_tag SET tag_id = tag_id")
+        assert conn.execute(
+            "SELECT count(*) AS n FROM item WHERE search_vector = %s::tsvector", (sentinel,)
+        ).fetchone() == {"n": 3}
+        # A real move refreshes exactly the two items involved, not the bystanders.
+        beta = conn.execute("SELECT id FROM tag WHERE name = 'beta'").fetchone()
+        assert beta is not None
+        conn.execute("UPDATE item_tag SET tag_id = %s WHERE item_id = %s", (beta["id"], a))
+        stale = conn.execute(
+            "SELECT id FROM item WHERE search_vector = %s::tsvector", (sentinel,)
+        ).fetchall()
+    assert {str(row["id"]) for row in stale} == {b, c}
+    assert found(client, headers, "beta") == [a]
+
+
+def test_assignment_updates_are_atomic_and_serialize_with_concurrent_changes(
+    settings: Settings, client: TestClient, headers: dict[str, str]
+) -> None:
+    _, a, b, _, _ = _two_owner_setup(settings, client, headers)
+    url = settings.database_url.get_secret_value()
+    with connection(settings) as conn:
+        beta = conn.execute("SELECT id FROM tag WHERE name = 'beta'").fetchone()
+        owner = conn.execute("SELECT owner_id FROM item WHERE id = %s", (a,)).fetchone()
+        assert beta is not None and owner is not None
+        conn.execute(
+            "INSERT INTO tag (id, owner_id, name) VALUES (%s, %s, 'delta')",
+            (delta := uuid7(), owner["owner_id"]),
+        )
+
+    # A failed statement leaves index and assignments untouched.
+    patch(client, headers, a, tags=["alpha", "beta"])
+    with connection(settings) as conn, pytest.raises(psycopg.errors.UniqueViolation):
+        conn.execute(
+            "UPDATE item_tag SET tag_id = %s WHERE item_id = %s AND tag_id <> %s",
+            (beta["id"], a, beta["id"]),
+        )
+    assert found(client, headers, "alpha") == [a]
+    assert set(found(client, headers, "beta")) == {a, b}
+    patch(client, headers, a, tags=["alpha"])
+    # A rolled-back update leaves the index as it was.
+    with psycopg.connect(url) as raw:
+        raw.execute("UPDATE item_tag SET item_id = %s WHERE item_id = %s", (b, a))
+        raw.rollback()
+    assert found(client, headers, "alpha") == [a] and found(client, headers, "beta") == [b]
+
+    # An uncommitted move of a's assignment holds a; a concurrent change on a waits and is
+    # applied on top, so no tag is lost.
+    mover_has_lock = threading.Event()
+    release = threading.Event()
+
+    def move_alpha_of_a_to_delta() -> None:
+        with psycopg.connect(url) as conn:
+            conn.execute("UPDATE item_tag SET tag_id = %s WHERE item_id = %s", (delta, a))
+            mover_has_lock.set()
+            release.wait(10)
+
+    def add_epsilon_to_a() -> None:
+        with psycopg.connect(url) as conn:
+            tag_id = uuid7()
+            conn.execute(
+                "INSERT INTO tag (id, owner_id, name) VALUES (%s, %s, 'epsilon')",
+                (tag_id, owner["owner_id"]),
+            )
+            conn.execute(
+                "INSERT INTO item_tag (id, owner_id, item_id, tag_id, created_by) "
+                "VALUES (%s, %s, %s, %s, 'user')",
+                (uuid7(), owner["owner_id"], a, tag_id),
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        mover = pool.submit(move_alpha_of_a_to_delta)
+        assert mover_has_lock.wait(10)
+        adder = pool.submit(add_epsilon_to_a)
+        time.sleep(0.5)
+        assert not adder.done(), "the concurrent change must wait for the item row"
+        release.set()
+        mover.result(10)
+        adder.result(10)
+    assert found(client, headers, "delta") == [a]
+    assert found(client, headers, "epsilon") == [a]
+    assert found(client, headers, "alpha") == []
+    assert found(client, headers, "beta") == [b]
+    assert found(client, headers, "delta epsilon") == [a]
+
+    # Two statements moving assignments in opposite directions never deadlock, whichever
+    # way they interleave, and both end up reflected.
+    with connection(settings) as conn:
+        conn.execute("DELETE FROM item_tag")
+        conn.execute(
+            "INSERT INTO item_tag (id, owner_id, item_id, tag_id, created_by) VALUES "
+            "(%s, %s, %s, %s, 'user'), (%s, %s, %s, %s, 'user')",
+            (uuid7(), owner["owner_id"], a, beta["id"], uuid7(), owner["owner_id"], b, delta),
+        )
+
+    def swap(source: str, target: str) -> None:
+        with psycopg.connect(url) as conn:
+            conn.execute("SET lock_timeout = '5s'")
+            for _ in range(20):
+                conn.execute(
+                    "UPDATE item_tag SET item_id = %s WHERE item_id = %s AND "
+                    "NOT EXISTS (SELECT 1 FROM item_tag x WHERE x.item_id = %s "
+                    "AND x.tag_id = item_tag.tag_id)",
+                    (target, source, target),
+                )
+                conn.commit()
+                source, target = target, source
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        for future in [pool.submit(swap, str(a), str(b)), pool.submit(swap, str(b), str(a))]:
+            future.result(60)
+    with connection(settings) as conn:
+        truth = {
+            (str(row["item_id"]), row["name"])
+            for row in conn.execute(
+                "SELECT it.item_id, t.name FROM item_tag it JOIN tag t ON t.id = it.tag_id"
+            ).fetchall()
+        }
+    for name in ("beta", "delta"):
+        assert set(found(client, headers, name)) == {item for item, tag in truth if tag == name}
+
+
+def test_migration_installs_and_removes_every_search_trigger(settings: Settings) -> None:
+    config = migration_config()
+    names = {
+        "item_search_before",
+        "item_tag_search_insert",
+        "item_tag_search_update",
+        "item_tag_search_delete",
+        "tag_search_renamed",
+    }
+
+    def installed() -> set[str]:
+        with connection(settings) as conn:
+            rows = conn.execute("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal").fetchall()
+            functions = conn.execute(
+                "SELECT count(*) AS n FROM pg_proc WHERE proname LIKE 'bag\\_%' "
+                "OR proname LIKE 'item\\_%search%' OR proname = 'tag_search_renamed'"
+            ).fetchone()
+        assert functions is not None
+        return {row["tgname"] for row in rows} | ({"functions"} if functions["n"] else set())
+
+    assert installed() == names | {"functions"}
+    command.downgrade(config, "0004_sessions")
+    try:
+        assert installed() == set()
+    finally:
+        command.upgrade(config, "head")
+    assert installed() == names | {"functions"}
+
+
 def test_import_rebuilds_the_search_index(
     settings: Settings, client: TestClient, headers: dict[str, str], tmp_path: Path
 ) -> None:

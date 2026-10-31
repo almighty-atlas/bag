@@ -18,10 +18,12 @@ def upgrade() -> None:
 def downgrade() -> None:
     for statement in (
         "DROP TRIGGER tag_search_renamed ON tag",
+        "DROP TRIGGER item_tag_search_update ON item_tag",
         "DROP TRIGGER item_tag_search_delete ON item_tag",
         "DROP TRIGGER item_tag_search_insert ON item_tag",
         "DROP TRIGGER item_search_before ON item",
         "DROP FUNCTION tag_search_renamed()",
+        "DROP FUNCTION item_tag_search_updated()",
         "DROP FUNCTION item_tag_search_changed()",
         "DROP FUNCTION item_search_before()",
         "DROP FUNCTION bag_refresh_item_search(uuid, uuid)",
