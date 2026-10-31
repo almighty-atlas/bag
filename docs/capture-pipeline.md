@@ -102,7 +102,7 @@ the integrity-verified original; it never rewrites `content`, the blob, the note
 the title. Per input:
 
 - Text: `mime_detect` confirms `text/plain`; `text_extract` copies `content` to
-  `extracted_text`, which feeds the generated search vector.
+  `extracted_text`, which feeds the search vector (weight D, ADR-0022).
 - File: `mime_detect` re-derives `mime_type` and file kind from stored bytes;
   unknown signatures that are strict UTF-8 without NUL or control bytes become
   `text/plain`. `text_extract` decodes such text files up to 1 MiB (truncation is

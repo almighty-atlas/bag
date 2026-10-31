@@ -27,10 +27,18 @@ Shelf is a view over persisted Bag items, not a second transport/store.
       classification with extra title/text is fixed and covered by a vitest
       test that runs the real `sw.js` on a multipart POST in Node; still open:
       a real-device test and a test in an actual browser service worker.
-- [ ] **Search upgrade:** include original filename and assigned tag names,
-      title/name-aware ranking and a structured field-level match reason.
-      Add migrations and DE/EN, owner-scoped and trashed-item regression
-      tests. Keep existing tag/collection filters working.
+- [ ] **Search follow-ups** (filename and tag search, weighted ranking and
+      `matched_fields` exist: ADR-0022, migration `0005_search_fields`):
+      - Check the "Gefunden in" line and filename/tag retrieval on real
+        devices; only API integration tests and vitest cover them.
+      - Index URL host and path words (`budget` in `budget.example.org/x-y`
+        is not searchable today) and show filename/tag hits in the snippet,
+        not only in `matched_fields`.
+      - Fold `ae/oe/ue` on the query side (`mueller` finds `Müller.pdf`, but
+        a stored `mueller.pdf` is not found by `müller`); compound words
+        (`Bücher` does not find `Bücherregal`) are not decomposed.
+      - Measure tag rename/delete on a large real Bag; if a tag spans many
+        thousand large items, move re-indexing to a background job.
 - [ ] **Immediate real-device smoke test:** Android Share→Bag; macOS browser
       paste/save→Bag; refresh and retrieve from a second device. Check that
       saved text shows its excerpt in the feed (API and line selection are
@@ -44,7 +52,8 @@ Shelf is a view over persisted Bag items, not a second transport/store.
 
 **3A done when:** no silent share loss, wrongly categorized URL, false
 save acknowledgement or unintended same-action retry duplicate; text and
-filename retrieval work on actual clients.
+filename retrieval work on actual clients (the API side of filename and tag
+retrieval is done and tested; the client check is the open item above).
 
 ## Phase 3B — Secure previews and daily-use UI
 
