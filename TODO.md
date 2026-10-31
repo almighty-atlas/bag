@@ -57,13 +57,20 @@ retrieval is done and tested; the client check is the open item above).
 
 ## Phase 3B — Secure previews and daily-use UI
 
-- [ ] **Thumbnail ADR:** decide decoder and re-encoder, resource limits
-      (bytes, dimensions, decompression bombs), a derived thumbnail blob
-      role, restricted inline response and content-security-policy handling.
-      Original and snapshot downloads must remain sandboxed/attachment.
-- [ ] **Image preview pipeline:** worker, safe authenticated endpoint,
-      responsive cards and details; corruption/oversized image tests and
-      visible fallback if thumbnail generation fails.
+- [x] **Thumbnail ADR** ([ADR-0023](docs/decisions/0023-safe-image-thumbnails.md)):
+      Pillow in an isolated child process, `thumbnail` blob role, restricted
+      inline response. Original and snapshot downloads stay attachments.
+- [x] **Image preview pipeline, backend:** `thumbnail` processor, authenticated
+      owner-scoped `GET /api/v1/items/{id}/thumbnail`, corruption, bomb and
+      tamper tests.
+- [ ] **Image preview UI:** responsive image cards and details that use the
+      thumbnail endpoint, with a visible fallback on `404` or a failed or
+      skipped `thumbnail` run. Decide whether listing summaries should say
+      whether a thumbnail exists (today only the endpoint and the processing
+      run reveal it). Check in a real browser on macOS and Android.
+- [ ] **Thumbnail follow-ups:** measure worker memory on the production host
+      against ADR-0023's 1 GiB child limit; decide on HEIC/AVIF and color
+      profile handling if real captures need them.
 - [ ] **Fast actions:** clipboard paste for text and supported images;
       context actions to open/copy/share/download; user-friendly
       processing status instead of raw processor names.
