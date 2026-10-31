@@ -7,12 +7,13 @@ from bag.config import Settings
 from bag.db import connection
 from bag.excerpt import SOURCE_CHARS, make_excerpt
 from bag.organize import COLLECTIONS_SQL, TAGS_SQL
+from bag.preview import THUMBNAIL_AVAILABLE_SQL
 from bag.schemas import ItemPage, ItemSummary, SearchPage, SearchResult
 
 SUMMARY_COLUMNS = (
     "id, kind, source, title, user_note, mime_type, original_filename, source_url, language, "
     f"processing_status, created_at, captured_at, updated_at, deleted_at, {TAGS_SQL}, "
-    f"{COLLECTIONS_SQL}, "
+    f"{COLLECTIONS_SQL}, {THUMBNAIL_AVAILABLE_SQL}, "
     # Only a bounded prefix of text originals leaves the database; see bag.excerpt.
     f"CASE WHEN kind = 'text' THEN substr(content, 1, {SOURCE_CHARS}) END AS excerpt_source"
 )

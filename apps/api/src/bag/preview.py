@@ -20,6 +20,15 @@ from bag.storage import BlobStorage, StorageError, StoredBlob
 
 logger = logging.getLogger("bag.preview")
 
+# A cheap hint for listings and details, from the blob row alone (indexed by owner and item).
+# It applies the endpoint's row checks but cannot know that the object is intact or the item
+# live: clients still handle a 404 from the endpoint, and never ask for a trashed item's.
+THUMBNAIL_AVAILABLE_SQL = (
+    "EXISTS (SELECT 1 FROM blob tb WHERE tb.owner_id = item.owner_id AND tb.item_id = item.id "
+    f"AND tb.role = 'thumbnail' AND tb.mime_type = '{OUTPUT_MIME_TYPE}' "
+    f"AND tb.size_bytes <= {MAX_OUTPUT_BYTES}) AS thumbnail_available"
+)
+
 
 def _unavailable() -> HTTPException:
     return HTTPException(404, "Thumbnail not available", headers={"Cache-Control": "no-store"})

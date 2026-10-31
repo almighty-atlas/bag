@@ -12,6 +12,7 @@ from bag.db import Row, connection
 from bag.ids import uuid7
 from bag.jobs import reprocess, schedule
 from bag.organize import COLLECTIONS_SQL, TAGS_SQL, set_item_named
+from bag.preview import THUMBNAIL_AVAILABLE_SQL
 from bag.schemas import (
     CaptureResponse,
     FileCapture,
@@ -184,7 +185,8 @@ def get_item(settings: Settings, owner_id: UUID, item_id: UUID) -> ItemResponse:
             "SELECT id, kind, source, title, content, user_note, mime_type, original_filename, "
             "content_hash, source_url, extracted_text, language, "
             f"processing_status, created_at, captured_at, updated_at, {TAGS_SQL}, "
-            f"{COLLECTIONS_SQL} FROM item WHERE owner_id = %s AND id = %s AND deleted_at IS NULL",
+            f"{COLLECTIONS_SQL}, {THUMBNAIL_AVAILABLE_SQL} FROM item "
+            "WHERE owner_id = %s AND id = %s AND deleted_at IS NULL",
             (owner_id, item_id),
         ).fetchone()
     if row is None:
