@@ -109,6 +109,20 @@ describe("POST share target through the service worker", () => {
     expect(parseRoute(result.hash)).toMatchObject({ name: "share", files: 1 });
   });
 
+  it("tags every received file with its own identity, even for identical files and repeated shares", async () => {
+    const lookAlike = () => new File(["same"], "foto.jpg", { type: "image/jpeg" });
+    const first = await postShare([
+      ["files", lookAlike()],
+      ["files", lookAlike()],
+    ]);
+    const second = await postShare([["files", lookAlike()]]);
+    const ids = [first.store.get("/shared/0"), first.store.get("/shared/1"), second.store.get("/shared/0")].map(
+      (entry) => entry?.headers.get("X-Bag-Share-Id"),
+    );
+    for (const id of ids) expect(id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(new Set(ids).size).toBe(3);
+  });
+
   it("redirects an empty share to an empty capture form", async () => {
     const { hash } = await postShare([]);
     expect(shareDraft((parseRoute(hash) as { payload: SharePayload }).payload)).toEqual({ content: "", note: "" });

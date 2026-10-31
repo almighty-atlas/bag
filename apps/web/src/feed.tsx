@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { ApiError, api, looksLikeUrl, organize, type ItemSummary, type NamedEntry } from "./api";
 import { EMPTY_FILTERS, href, type Filters, type Route } from "./app";
+import { CaptureKeys, uploadFiles, type PendingFile } from "./retry";
 import type { ShareDraft } from "./share";
 
 type Row = ItemSummary & { snippet?: string };
@@ -34,7 +35,7 @@ export function describe(item: ItemSummary): string {
 }
 
 /** Files a POST share target stashed in the cache; uploaded once, then forgotten. */
-export async function uploadSharedFiles(note: string | null): Promise<number> {
+export async function uploadSharedFiles(note: string | null, keys: CaptureKeys): Promise<number> {
   if (!("caches" in globalThis)) return 0;
   const cache = await caches.open("bag-share");
   const countResponse = await cache.match("/shared/count");
@@ -47,8 +48,13 @@ export async function uploadSharedFiles(note: string | null): Promise<number> {
     const file = new File([await stored.blob()], name, {
       type: stored.headers.get("Content-Type") ?? "application/octet-stream",
     });
-    await api.captureFile(file, note);
+    // The worker tags each received file; equal name, size and type never imply the same file.
+    // Entries stashed by an older worker lack the tag and get a fresh key on every read.
+    const shareId = stored.headers.get("X-Bag-Share-Id");
+    const payload = [shareId === null ? keys.file(file) : `shared:${shareId}`, note];
+    await api.captureFile(file, note, keys.key(...payload));
     await cache.delete(`/shared/${index}`);
+    keys.confirm(...payload);
     uploaded += 1;
   }
   await cache.delete("/shared/count");
@@ -251,6 +257,8 @@ function Capture({
   const [multilineNote] = useState(() => Boolean(initial?.note.includes("\n")));
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
+  const [keys] = useState(() => new CaptureKeys());
   const fileInput = useRef<HTMLInputElement>(null);
 
   const finish = (duplicate: string | null) => {
@@ -260,8 +268,11 @@ function Capture({
     onSaved();
   };
 
-  const fail = (failure: unknown) => {
-    setStatus(failure instanceof ApiError ? `Fehler: ${failure.message}` : "Speichern fehlgeschlagen.");
+  const fail = (failure: unknown, saved = 0) => {
+    const reason = failure instanceof ApiError ? `Fehler: ${failure.message}` : "Speichern nicht bestätigt.";
+    setStatus(
+      `${saved ? `${saved} Datei(en) gespeichert. ` : ""}${reason} Unverändert erneut speichern legt kein Duplikat an; geänderte Eingaben werden als neue Erfassung gespeichert.`,
+    );
   };
 
   const save = async (event: Event) => {
@@ -272,17 +283,20 @@ function Capture({
     try {
       const userNote = note.trim() || null;
       let duplicate: string | null = null;
+      const isUrl = looksLikeUrl(content);
+      const payload = isUrl ? ["url", content, userNote] : ["text", text, userNote];
       if (content) {
-        const result = looksLikeUrl(content)
-          ? await api.captureUrl(content, userNote)
-          : await api.captureText(text, userNote);
+        const key = keys.key(...payload);
+        const result = isUrl ? await api.captureUrl(content, userNote, key) : await api.captureText(text, userNote, key);
         duplicate = result.duplicate_of;
       }
       if (pendingShare) {
-        await uploadSharedFiles(userNote);
+        await uploadSharedFiles(userNote, keys);
         setPendingShare(0);
         history.replaceState(null, "", "/#/");
       }
+      // Confirmed only after the whole action: retrying after a failed shared upload replays the text.
+      if (content) keys.confirm(...payload);
       finish(duplicate);
     } catch (failure: unknown) {
       fail(failure);
@@ -291,20 +305,27 @@ function Capture({
     }
   };
 
-  const upload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
+  const sendFiles = async (files: PendingFile[]) => {
     setBusy(true);
     try {
-      for (const file of Array.from(files)) {
-        await api.captureFile(file, note.trim() || null);
+      const batch = await uploadFiles(files, keys, (file, fileNote, key) => api.captureFile(file, fileNote, key));
+      // Replace the attempted entries by those still unconfirmed; other pending files stay listed.
+      setPendingFiles((current) => [...current.filter((entry) => !files.includes(entry)), ...batch.pending]);
+      if (batch.pending.length === 0) finish(null);
+      else {
+        if (batch.saved) onSaved();
+        fail(batch.error, batch.saved);
       }
-      finish(null);
-    } catch (failure: unknown) {
-      fail(failure);
     } finally {
       setBusy(false);
       if (fileInput.current) fileInput.current.value = "";
     }
+  };
+
+  const upload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const fileNote = note.trim() || null;
+    await sendFiles(Array.from(files, (file) => ({ file, note: fileNote })));
   };
 
   return (
@@ -352,6 +373,17 @@ function Capture({
       {pendingShare > 0 && (
         <p class="hint">
           {pendingShare} geteilte Datei(en) warten. Optional einen Gedanken ergänzen, dann „In die Tasche“.
+        </p>
+      )}
+      {pendingFiles.length > 0 && (
+        <p class="hint">
+          {pendingFiles.length} Datei(en) nicht bestätigt: {pendingFiles.map(({ file }) => file.name).join(", ")}.{" "}
+          <button type="button" disabled={busy} onClick={() => void sendFiles(pendingFiles)}>
+            Erneut versuchen
+          </button>{" "}
+          <button type="button" class="link" disabled={busy} onClick={() => setPendingFiles([])}>
+            Verwerfen
+          </button>
         </p>
       )}
       {status && <p class="status" role="status">{status}</p>}

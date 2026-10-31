@@ -21,6 +21,20 @@ editable note. Without a link, or with several different links in free text, all
 values become one text capture. A GET `/share?…` maps onto the same route. The app
 then uploads the parked files with the note through the normal capture call and
 clears the cache. Nothing is saved until the user confirms "In die Tasche".
+Web captures keep one `client_capture_id` per logical capture (`retry.ts`): the
+key belongs to the exact payload (kind, text or URL, note; for a file the picked
+`File` object and note, for a shared file the random `X-Bag-Share-Id` the worker
+stores with each received file, plus the note; entries without it get a fresh key
+per attempt) and is dropped only after the server confirmed it. Equal name, size
+and type never make two files share a key. Resending unchanged
+input after a failed or unanswered request replays the same key, so the server
+returns the stored item instead of a duplicate; edited input, a newly picked file
+or a repeat after a confirmed save gets a new key, because the server would
+otherwise answer a reused key with the first item. Text sent together with shared
+files is confirmed only after all files succeed. A file batch stops at the first
+unconfirmed upload and lists the rest with "Erneut versuchen" (same files, notes
+and keys; confirmed files are not resent) or "Verwerfen". Keys live in the page's
+memory: a reload or new page starts fresh keys.
 Fetched HTML snapshots can be previewed in an iframe
 with an empty `sandbox` attribute and an injected CSP (`default-src 'none'`), so
 no script runs and no request leaves the page. Routing, share classification and
@@ -246,9 +260,10 @@ See [TODO](../TODO.md) for actionable fixes and acceptance tests.
 - Shared files are staged in fixed cache keys such as /shared/0 and
   /shared/count. Successive unconfirmed shares can replace the earlier
   selection; preservation/queueing and failure feedback are not implemented.
-- The web capture methods generate a new client_capture_id for each request.
-  This does not retain the ID for the same user's retry after an uncertain
-  response, even though server-side idempotent replay with one key exists.
+- Fixed: the web capture methods used to generate a new client_capture_id for
+  each request. Retries of the same payload now reuse it (see above), verified
+  by vitest tests against a fake idempotent server, not on a real network or
+  device. Keys do not survive a page reload.
 - Feed summaries do not carry text excerpts and can label text captures
   simply as "text". There is no image paste handler, contextual
   copy/share/pin function, or compact mobile-first Shelf surface.
