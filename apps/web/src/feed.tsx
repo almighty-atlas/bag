@@ -48,8 +48,10 @@ export async function uploadSharedFiles(note: string | null, keys: CaptureKeys):
     const file = new File([await stored.blob()], name, {
       type: stored.headers.get("Content-Type") ?? "application/octet-stream",
     });
-    // Cached files are new objects on every read, so the slot and file details identify the payload.
-    const payload = ["shared", index, name, file.size, file.type, note];
+    // The worker tags each received file; equal name, size and type never imply the same file.
+    // Entries stashed by an older worker lack the tag and get a fresh key on every read.
+    const shareId = stored.headers.get("X-Bag-Share-Id");
+    const payload = [shareId === null ? keys.file(file) : `shared:${shareId}`, note];
     await api.captureFile(file, note, keys.key(...payload));
     await cache.delete(`/shared/${index}`);
     keys.confirm(...payload);

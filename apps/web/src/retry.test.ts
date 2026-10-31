@@ -160,26 +160,44 @@ describe("shared file retries", () => {
     vi.unstubAllGlobals();
   });
 
-  it("replays the key of a shared file whose response was lost and forgets it once confirmed", async () => {
-    const store = new Map<string, Response>([
-      ["/shared/count", new Response("2")],
-      ["/shared/0", new Response("eins", { headers: { "Content-Type": "text/plain", "X-Bag-Filename": "a.txt" } })],
-      ["/shared/1", new Response("zwei", { headers: { "Content-Type": "text/plain", "X-Bag-Filename": "b.txt" } })],
-    ]);
-    // Cache reads consume bodies, so hand out clones like the Cache API does.
+  const stored = (body: string, name: string, shareId: string | null) =>
+    new Response(body, {
+      headers: {
+        "Content-Type": "text/plain",
+        "X-Bag-Filename": name,
+        ...(shareId === null ? {} : { "X-Bag-Share-Id": shareId }),
+      },
+    });
+
+  /** A share cache stub; reads hand out clones like the Cache API, so bodies stay readable. */
+  function shareCache(entries: Response[]): Map<string, Response> {
+    const store = new Map<string, Response>([["/shared/count", new Response(String(entries.length))]]);
+    entries.forEach((entry, index) => store.set(`/shared/${index}`, entry));
     vi.stubGlobal("caches", {
       open: async () => ({
         match: async (key: string) => store.get(key)?.clone(),
         delete: async (key: string) => store.delete(key),
       }),
     });
-    const server = new FakeServer();
+    return store;
+  }
+
+  /** Routes api.captureFile to the fake server, recording file name, content and key. */
+  function captureTo(server: FakeServer): string[] {
     const sent: string[] = [];
     vi.spyOn(api, "captureFile").mockImplementation(async (file, note, key) => {
+      const content = await file.text();
       sent.push(`${file.name}:${key}`);
-      await server.capture([file.name, note], key);
+      await server.capture([file.name, content, note], key);
       return { id: "x", status: "stored", processing_status: "queued", duplicate_of: null };
     });
+    return sent;
+  }
+
+  it("replays the key of a shared file whose response was lost and forgets it once confirmed", async () => {
+    const store = shareCache([stored("eins", "a.txt", "share-a"), stored("zwei", "b.txt", "share-b")]);
+    const server = new FakeServer();
+    const sent = captureTo(server);
     const captureKeys = keys();
     server.next("ok", "lost");
     await expect(uploadSharedFiles("Notiz", captureKeys)).rejects.toThrow();
@@ -189,8 +207,52 @@ describe("shared file retries", () => {
     expect(await uploadSharedFiles("Notiz", captureKeys)).toBe(1);
     expect(sent.map((entry) => entry.split(":")[0])).toEqual(["a.txt", "b.txt", "b.txt"]);
     expect(sent[1]).toBe(sent[2]);
-    expect(server.items).toEqual([["a.txt", "Notiz"], ["b.txt", "Notiz"]]);
+    expect(server.items).toEqual([
+      ["a.txt", "eins", "Notiz"],
+      ["b.txt", "zwei", "Notiz"],
+    ]);
     expect(store.size).toBe(0);
+  });
+
+  it("gives a different file with identical name, size and type in the same slot its own key", async () => {
+    // A lost response leaves the first file pending; a later share puts look-alike bytes into slot 0.
+    shareCache([stored("eins", "foto.jpg", "share-1")]);
+    const server = new FakeServer();
+    const sent = captureTo(server);
+    const captureKeys = keys();
+    server.next("lost");
+    await expect(uploadSharedFiles(null, captureKeys)).rejects.toThrow();
+
+    shareCache([stored("zwei", "foto.jpg", "share-2")]);
+    expect(await uploadSharedFiles(null, captureKeys)).toBe(1);
+    expect(sent[0]).not.toBe(sent[1]);
+    // Both files are stored; the second is not answered with the first item.
+    expect(server.items).toEqual([
+      ["foto.jpg", "eins", null],
+      ["foto.jpg", "zwei", null],
+    ]);
+  });
+
+  it("keeps two look-alike files of one share apart", async () => {
+    shareCache([stored("eins", "scan.pdf", "share-1"), stored("zwei", "scan.pdf", "share-2")]);
+    const server = new FakeServer();
+    const sent = captureTo(server);
+    expect(await uploadSharedFiles(null, keys())).toBe(2);
+    expect(new Set(sent).size).toBe(2);
+    expect(server.items).toHaveLength(2);
+  });
+
+  it("never reuses a key for untagged entries from an older worker", async () => {
+    shareCache([stored("eins", "a.txt", null)]);
+    const server = new FakeServer();
+    const sent = captureTo(server);
+    const captureKeys = keys();
+    server.next("offline");
+    await expect(uploadSharedFiles(null, captureKeys)).rejects.toThrow();
+    shareCache([stored("zwei", "a.txt", null)]);
+    await uploadSharedFiles(null, captureKeys);
+    expect(sent[0]).not.toBe(sent[1]);
+    expect(server.items).toEqual([["a.txt", "zwei", null]]);
   });
 });
 

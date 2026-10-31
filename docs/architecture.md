@@ -23,8 +23,10 @@ then uploads the parked files with the note through the normal capture call and
 clears the cache. Nothing is saved until the user confirms "In die Tasche".
 Web captures keep one `client_capture_id` per logical capture (`retry.ts`): the
 key belongs to the exact payload (kind, text or URL, note; for a file the picked
-`File` object and note, for a shared file its cache slot, name, size, type and
-note) and is dropped only after the server confirmed it. Resending unchanged
+`File` object and note, for a shared file the random `X-Bag-Share-Id` the worker
+stores with each received file, plus the note; entries without it get a fresh key
+per attempt) and is dropped only after the server confirmed it. Equal name, size
+and type never make two files share a key. Resending unchanged
 input after a failed or unanswered request replays the same key, so the server
 returns the stored item instead of a duplicate; edited input, a newly picked file
 or a repeat after a confirmed save gets a new key, because the server would

@@ -29,6 +29,8 @@ async function stashShare(request) {
           headers: {
             "Content-Type": file.type || "application/octet-stream",
             "X-Bag-Filename": encodeURIComponent(file.name || "shared"),
+            // Identity of this received file: retries reuse its capture key, a new share never does.
+            "X-Bag-Share-Id": crypto.randomUUID(),
           },
         }),
       ),
