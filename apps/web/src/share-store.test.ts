@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  BatchGoneError,
+  MissingFilesError,
   SHARE_CACHE,
   derivedKey,
   describeBatch,
   discardBatch,
   listBatches,
   loadBatch,
+  missingFiles,
   remainingFiles,
   saveBatch,
   type BatchSenders,
@@ -137,6 +140,122 @@ describe("saving a pending share", () => {
       ["foto.txt", "aaaa", null],
       ["foto.txt", "bbbb", null],
     ]);
+  });
+
+  it("never counts a file as saved whose bytes are gone without server confirmation", async () => {
+    const { worker, server, caches } = setup();
+    const batch = await share(worker, file("a.txt", "eins"), file("b.txt", "zwei"), file("c.txt", "drei"));
+    // Cache loss (eviction, cleared site data) removes one file's bytes before it was ever sent.
+    await (await caches.open(SHARE_CACHE)).delete(`/shared/${batch.id}/${batch.files[1]!.id}`);
+    expect(await missingFiles(batch)).toEqual([batch.files[1]]);
+
+    const failure = await saveBatch(batch, "", null, await senders(server)).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(MissingFilesError);
+    expect((failure as MissingFilesError).names).toEqual(["b.txt"]);
+    // The intact files were still saved, the batch and the lost file's record stay.
+    expect(server.items).toEqual([
+      ["a.txt", "eins", null],
+      ["c.txt", "drei", null],
+    ]);
+    expect(await loadBatch(batch.id)).toEqual(batch);
+    expect((await remainingFiles(batch)).map((entry) => entry.name)).toEqual(["b.txt"]);
+    expect(await missingFiles(batch)).toEqual([batch.files[1]]);
+
+    // Saving again neither resends the confirmed files nor pretends b.txt exists.
+    await expect(saveBatch(batch, "", null, await senders(server))).rejects.toBeInstanceOf(MissingFilesError);
+    expect(server.requests).toHaveLength(2);
+
+    // Only an explicit discard removes it, including the confirmation markers.
+    await discardBatch(batch);
+    expect(caches.paths(SHARE_CACHE)).toEqual([]);
+  });
+
+  it("tells a confirmed file from a lost one after a partial failure and a reload", async () => {
+    const { worker, server, caches } = setup();
+    const batch = await share(worker, file("a.txt", "eins"), file("b.txt", "zwei"), file("c.txt", "drei"));
+    server.next("ok", "offline");
+    await expect(saveBatch(batch, "", null, await senders(server))).rejects.toThrow(TypeError);
+    // a is confirmed (bytes deleted); now b is also lost from the cache.
+    await (await caches.open(SHARE_CACHE)).delete(`/shared/${batch.id}/${batch.files[1]!.id}`);
+
+    const reopened = (await listBatches())[0]!;
+    await expect(saveBatch(reopened, "", null, await senders(server))).rejects.toBeInstanceOf(MissingFilesError);
+    // c was sent now, a never again, b never.
+    expect(server.items.map((item) => (item as string[])[0])).toEqual(["a.txt", "c.txt"]);
+    expect((await remainingFiles(reopened)).map((entry) => entry.name)).toEqual(["b.txt"]);
+    expect(await loadBatch(batch.id)).not.toBeNull();
+  });
+
+  it("does not resend a confirmed file whose cleanup was interrupted, and finishes the batch", async () => {
+    const { worker, server, caches } = setup();
+    const batch = await share(worker, file("a.txt", "eins"));
+    // Confirmed by the server, marker written, then the page died before the bytes were deleted.
+    await senders(server).then((send) => send.file(new File(["eins"], "a.txt"), null, "interrupted"));
+    await (await caches.open(SHARE_CACHE)).put(`/shared/${batch.id}/${batch.files[0]!.id}.saved`, new Response("saved"));
+    const before = server.requests.length;
+    await expect(saveBatch(batch, "", null, await senders(server))).resolves.toMatchObject({ saved: 0 });
+    expect(server.requests).toHaveLength(before);
+    expect(caches.paths(SHARE_CACHE)).toEqual([]);
+  });
+
+  it("keeps the batch when the confirmation marker cannot be written, and a retry creates no duplicate", async () => {
+    const { worker, server, caches } = setup();
+    const batch = await share(worker, file("a.txt", "eins"));
+    caches.failPut = (_, key) => key.endsWith(".saved");
+    await expect(saveBatch(batch, "", null, await senders(server))).rejects.toThrow("QuotaExceededError");
+    caches.failPut = null;
+    expect(await remainingFiles(batch)).toHaveLength(1);
+    await saveBatch(batch, "", null, await senders(server));
+    expect(server.items).toHaveLength(1);
+    expect(server.requests[0]).toBe(server.requests[1]);
+    expect(await listBatches()).toEqual([]);
+  });
+
+  it("serializes concurrent saves of one batch: everything is sent once, the loser learns the batch is gone", async () => {
+    const { worker, server } = setup();
+    const batch = await share(worker, file("a.txt", "eins"), file("b.txt", "zwei"), ["text", "Text"]);
+    const slow = await senders(server);
+    const send: BatchSenders = {
+      text: async (...args) => (await new Promise((resolve) => setTimeout(resolve, 5)), slow.text(...args)),
+      url: slow.url,
+      file: async (...args) => (await new Promise((resolve) => setTimeout(resolve, 5)), slow.file(...args)),
+    };
+    const results = await Promise.allSettled([
+      saveBatch(batch, "Text", null, send),
+      saveBatch(batch, "Text", null, send),
+      saveBatch(batch, "Text", null, send),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    for (const result of results) {
+      if (result.status === "rejected") expect(result.reason).toBeInstanceOf(BatchGoneError);
+    }
+    expect(server.requests).toHaveLength(3);
+    expect(server.items).toHaveLength(3);
+    expect(await listBatches()).toEqual([]);
+  });
+
+  it("lets a concurrent save continue after the first one failed, without repeating confirmed files", async () => {
+    const { worker, server } = setup();
+    const batch = await share(worker, file("a.txt", "eins"), file("b.txt", "zwei"));
+    server.next("ok", "offline");
+    const send = await senders(server);
+    const [first, second] = await Promise.allSettled([
+      saveBatch(batch, "", null, send),
+      saveBatch(batch, "", null, send),
+    ]);
+    expect(first.status).toBe("rejected");
+    expect(second.status).toBe("fulfilled");
+    expect(server.items.map((item) => (item as string[])[0])).toEqual(["a.txt", "b.txt"]);
+    expect(server.requests).toHaveLength(3);
+    expect(await listBatches()).toEqual([]);
+  });
+
+  it("refuses to save a batch that was discarded in the meantime and sends nothing", async () => {
+    const { worker, server } = setup();
+    const batch = await share(worker, file("a.txt", "eins"), ["text", "Text"]);
+    await discardBatch(batch);
+    await expect(saveBatch(batch, "Text", null, await senders(server))).rejects.toBeInstanceOf(BatchGoneError);
+    expect(server.requests).toEqual([]);
   });
 
   it("derives the same UUID-shaped key for the same inputs only", async () => {

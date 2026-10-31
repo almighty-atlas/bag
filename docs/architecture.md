@@ -29,10 +29,19 @@ text, all values become one text capture. A legacy GET `/share?…` maps onto th
 form with its fields inline, without a stored batch. The feed lists all other
 unsaved batches under "Noch nicht gespeichert" with "Öffnen und speichern" and
 "Verwerfen" (asks for confirmation); the open batch also has "Verwerfen".
-Saving ("In die Tasche") sends the content, then each remaining file in order. A
-file's cache entry is deleted only after the server confirmed it, and the batch
-(meta last) only after everything is saved or on an explicit discard; any failure
-keeps the batch with its unconfirmed files. If the user clears the content field
+Saving ("In die Tasche") sends the content, then each remaining file in order. After
+the server confirmed a file, a marker `/shared/<batch>/<file-id>.saved` is written
+and only then the file bytes are deleted, so missing bytes alone never mean
+"saved". A file with neither bytes nor marker was lost (e.g. cache eviction): it
+is skipped, the other files are still saved, and the save ends with an error that
+names it ("nicht mehr auf diesem Gerät vorhanden und nie gespeichert"); the batch
+stays and the list shows how many files are gone. The batch (meta last, with all
+markers) is deleted only after every file is confirmed or on an explicit discard;
+any failure keeps the batch. Saves of one batch are serialized (Web Locks where
+available, otherwise a queue within the page) and re-read the batch, so a
+concurrent second save neither resends confirmed files nor reports a false
+success: if the batch is already saved or discarded it ends with "nicht mehr
+offen". The Web Locks branch itself is not covered by the Node tests. If the user clears the content field
 and saves only the files, the original shared text is discarded with the batch.
 Capture IDs of a batch are derived (SHA-256 of batch ID, file ID or content, kind
 and note, formatted as a UUID), so they are identical after a page reload: an

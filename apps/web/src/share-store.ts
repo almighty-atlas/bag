@@ -7,8 +7,11 @@ import { shareDraft, type ShareDraft } from "./share";
  *   /shared/<batch>/meta    JSON: batch id, time, url/title/text values, file list
  *   /shared/<batch>/<file>  the file bytes (type in Content-Type)
  * The meta entry is written last, so a batch without it was never acknowledged.
- * A file entry is deleted only after the server confirmed that file; the batch
- * disappears only after everything in it was saved or the user discarded it.
+ *   /shared/<batch>/<file>.saved  marker: the server confirmed this file
+ * The marker is written after the server's confirmation and before the file bytes
+ * are deleted, so "bytes gone" alone never means "saved": a file without bytes and
+ * without marker was lost and keeps the batch. The batch disappears only after
+ * every file is confirmed or the user discarded it.
  */
 export const SHARE_CACHE = "bag-share";
 
@@ -63,6 +66,21 @@ function parseBatch(value: unknown): ShareBatch | null {
 
 const metaPath = (batchId: string) => `/shared/${batchId}/meta`;
 const filePath = (batchId: string, fileId: string) => `/shared/${batchId}/${fileId}`;
+const savedPath = (batchId: string, fileId: string) => `/shared/${batchId}/${fileId}.saved`;
+
+/** Files that cannot be saved because their bytes are gone without a server confirmation. */
+export class MissingFilesError extends Error {
+  constructor(readonly names: string[]) {
+    super("Shared files are missing from storage");
+  }
+}
+
+/** The batch was saved or discarded in the meantime (another tab, or an earlier save attempt). */
+export class BatchGoneError extends Error {
+  constructor() {
+    super("Pending share is no longer open");
+  }
+}
 
 async function openCache(): Promise<Cache | null> {
   return "caches" in globalThis ? caches.open(SHARE_CACHE) : null;
@@ -96,12 +114,38 @@ export async function loadBatch(batchId: string): Promise<ShareBatch | null> {
   return cache && UUID.test(batchId) ? readBatch(cache, batchId) : null;
 }
 
-/** The files whose bytes are still stored, i.e. not yet confirmed by the server. */
+interface FileStates {
+  /** Bytes stored, not confirmed: still to send. */
+  pending: SharedFile[];
+  /** Neither bytes nor confirmation: lost, must never count as saved. */
+  missing: SharedFile[];
+}
+
+async function fileStates(cache: Cache, batch: ShareBatch): Promise<FileStates> {
+  const states = await Promise.all(
+    batch.files.map(async (file) => {
+      if ((await cache.match(savedPath(batch.id, file.id))) !== undefined) return "saved";
+      return (await cache.match(filePath(batch.id, file.id))) !== undefined ? "pending" : "missing";
+    }),
+  );
+  return {
+    pending: batch.files.filter((_, index) => states[index] === "pending"),
+    missing: batch.files.filter((_, index) => states[index] === "missing"),
+  };
+}
+
+/** Files not confirmed by the server: still sendable, or lost. */
 export async function remainingFiles(batch: ShareBatch): Promise<SharedFile[]> {
   const cache = await openCache();
   if (!cache) return [];
-  const present = await Promise.all(batch.files.map(async (file) => (await cache.match(filePath(batch.id, file.id))) !== undefined));
-  return batch.files.filter((_, index) => present[index]);
+  const { pending, missing } = await fileStates(cache, batch);
+  return batch.files.filter((file) => pending.includes(file) || missing.includes(file));
+}
+
+/** Files whose bytes were lost before the server ever confirmed them. */
+export async function missingFiles(batch: ShareBatch): Promise<SharedFile[]> {
+  const cache = await openCache();
+  return cache ? (await fileStates(cache, batch)).missing : [];
 }
 
 async function readFile(cache: Cache, batchId: string, file: SharedFile): Promise<File | null> {
@@ -114,7 +158,9 @@ async function readFile(cache: Cache, batchId: string, file: SharedFile): Promis
 export async function discardBatch(batch: ShareBatch): Promise<void> {
   const cache = await openCache();
   if (!cache) return;
-  await Promise.all(batch.files.map((file) => cache.delete(filePath(batch.id, file.id))));
+  await Promise.all(
+    batch.files.flatMap((file) => [cache.delete(filePath(batch.id, file.id)), cache.delete(savedPath(batch.id, file.id))]),
+  );
   await cache.delete(metaPath(batch.id));
 }
 
@@ -149,10 +195,30 @@ export interface BatchSenders {
   file: (file: File, note: string | null, key: string) => Promise<unknown>;
 }
 
+const queues = new Map<string, Promise<unknown>>();
+
+/** One save at a time per batch: Web Locks across tabs where available, else a queue in this page. */
+async function withBatchLock<T>(batchId: string, run: () => Promise<T>): Promise<T> {
+  const locks = (globalThis.navigator as { locks?: LockManager } | undefined)?.locks;
+  if (locks) return (await locks.request(`bag-share-${batchId}`, run)) as T;
+  const previous = queues.get(batchId) ?? Promise.resolve();
+  const current = previous.catch(() => undefined).then(run);
+  queues.set(batchId, current);
+  try {
+    return await current;
+  } finally {
+    if (queues.get(batchId) === current) queues.delete(batchId);
+  }
+}
+
 /**
  * Saves the batch's content and its remaining files, in order, and discards the
- * batch only when all of it is confirmed. The first failure is thrown; files
- * confirmed before it are already gone from the cache and are not sent again.
+ * batch only when every file is confirmed. The first send failure is thrown;
+ * confirmed files are marked and not sent again. A file whose bytes are gone
+ * without confirmation is skipped, the rest is still saved, and
+ * MissingFilesError is thrown at the end with the batch kept. Saves of one batch
+ * are serialized and re-read the batch, so a second attempt never repeats or
+ * misjudges the first; if the batch is gone by then, BatchGoneError is thrown.
  * `content` is what the form currently holds (the user may have edited it).
  */
 export async function saveBatch(
@@ -161,24 +227,39 @@ export async function saveBatch(
   note: string | null,
   send: BatchSenders,
 ): Promise<{ duplicate: string | null; saved: number }> {
-  const cache = await openCache();
-  if (!cache) throw new Error("Cache storage unavailable");
-  let duplicate: string | null = null;
-  const link = content.trim();
-  if (link) {
-    const isUrl = looksLikeUrl(link);
-    const key = await derivedKey("content", batch.id, isUrl ? "url" : "text", isUrl ? link : content, note);
-    const result = isUrl ? await send.url(link, note, key) : await send.text(content, note, key);
-    duplicate = result.duplicate_of;
-  }
-  let saved = 0;
-  for (const file of batch.files) {
-    const stored = await readFile(cache, batch.id, file);
-    if (stored === null) continue;
-    await send.file(stored, note, await derivedKey("file", batch.id, file.id, note));
-    await cache.delete(filePath(batch.id, file.id));
-    saved += 1;
-  }
-  await discardBatch(batch);
-  return { duplicate, saved };
+  return withBatchLock(batch.id, async () => {
+    const cache = await openCache();
+    if (!cache) throw new Error("Cache storage unavailable");
+    const current = await readBatch(cache, batch.id);
+    if (current === null) throw new BatchGoneError();
+    let duplicate: string | null = null;
+    const link = content.trim();
+    if (link) {
+      const isUrl = looksLikeUrl(link);
+      const key = await derivedKey("content", current.id, isUrl ? "url" : "text", isUrl ? link : content, note);
+      const result = isUrl ? await send.url(link, note, key) : await send.text(content, note, key);
+      duplicate = result.duplicate_of;
+    }
+    let saved = 0;
+    const missing: SharedFile[] = [];
+    for (const file of current.files) {
+      if ((await cache.match(savedPath(current.id, file.id))) !== undefined) {
+        // Confirmed earlier; only the cleanup after the confirmation may have been interrupted.
+        await cache.delete(filePath(current.id, file.id));
+        continue;
+      }
+      const stored = await readFile(cache, current.id, file);
+      if (stored === null) {
+        missing.push(file);
+        continue;
+      }
+      await send.file(stored, note, await derivedKey("file", current.id, file.id, note));
+      await cache.put(savedPath(current.id, file.id), new Response("saved"));
+      await cache.delete(filePath(current.id, file.id));
+      saved += 1;
+    }
+    if (missing.length > 0) throw new MissingFilesError(missing.map((file) => file.name));
+    await discardBatch(current);
+    return { duplicate, saved };
+  });
 }

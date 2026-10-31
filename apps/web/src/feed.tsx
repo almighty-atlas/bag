@@ -5,7 +5,7 @@ import { EMPTY_FILTERS, href, type Filters, type Route } from "./app";
 import { PendingShares, DISCARD_CONFIRMATION } from "./pending";
 import { CaptureKeys, uploadFiles, type PendingFile } from "./retry";
 import type { ShareDraft } from "./share";
-import { discardBatch, remainingFiles, saveBatch, type ShareBatch } from "./share-store";
+import { BatchGoneError, MissingFilesError, discardBatch, remainingFiles, saveBatch, type ShareBatch } from "./share-store";
 
 type Row = ItemSummary & { snippet?: string };
 
@@ -234,6 +234,16 @@ function Capture({ onSaved, share }: { onSaved: () => void; share: ShareInput | 
   };
 
   const fail = (failure: unknown, saved = 0) => {
+    if (failure instanceof BatchGoneError) {
+      setStatus("Dieser geteilte Inhalt ist nicht mehr offen: bereits gespeichert oder verworfen.");
+      return;
+    }
+    if (failure instanceof MissingFilesError) {
+      setStatus(
+        `${failure.names.join(", ")}: nicht mehr auf diesem Gerät vorhanden und nie gespeichert. Bitte erneut teilen; der geteilte Inhalt bleibt bis zum Verwerfen offen.`,
+      );
+      return;
+    }
     const reason = failure instanceof ApiError ? `Fehler: ${failure.message}` : "Speichern nicht bestätigt.";
     setStatus(
       `${saved ? `${saved} Datei(en) gespeichert. ` : ""}${reason} Unverändert erneut speichern legt kein Duplikat an; geänderte Eingaben werden als neue Erfassung gespeichert.`,

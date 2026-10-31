@@ -1,19 +1,21 @@
 import { useEffect, useState } from "preact/hooks";
 
 import { href } from "./app";
-import { describeBatch, discardBatch, listBatches, remainingFiles, type ShareBatch } from "./share-store";
+import { describeBatch, discardBatch, listBatches, missingFiles, remainingFiles, type ShareBatch } from "./share-store";
 
 export const DISCARD_CONFIRMATION =
   "Diesen geteilten Inhalt endgültig verwerfen? Er wurde noch nicht in der Tasche gespeichert.";
 
 /** Shared content that reached this device but is not saved yet; nothing leaves the list unasked. */
 export function PendingShares({ exclude }: { exclude: string | null }) {
-  const [batches, setBatches] = useState<(ShareBatch & { open: number })[]>([]);
+  const [batches, setBatches] = useState<(ShareBatch & { open: number; lost: number })[]>([]);
 
   const refresh = async () => {
     const listed = await listBatches();
-    const open = await Promise.all(listed.map(async (batch) => (await remainingFiles(batch)).length));
-    setBatches(listed.map((batch, index) => ({ ...batch, open: open[index] ?? 0 })));
+    const counts = await Promise.all(
+      listed.map(async (batch) => [(await remainingFiles(batch)).length, (await missingFiles(batch)).length] as const),
+    );
+    setBatches(listed.map((batch, index) => ({ ...batch, open: counts[index]?.[0] ?? 0, lost: counts[index]?.[1] ?? 0 })));
   };
 
   useEffect(() => {
@@ -37,6 +39,7 @@ export function PendingShares({ exclude }: { exclude: string | null }) {
             <span>
               {describeBatch(batch)}
               {batch.open > 0 && <> · {batch.open} Datei(en)</>}
+              {batch.lost > 0 && <> · {batch.lost} nicht mehr vorhanden</>}
               <span class="muted"> · {new Date(batch.created_at).toLocaleString()}</span>
             </span>{" "}
             <a class="button" href={href({ name: "share", batch: batch.id, payload: { url: [], title: [], text: [] } })}>
