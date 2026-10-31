@@ -9,6 +9,8 @@ export interface ItemSummary {
   mime_type: string | null;
   original_filename: string | null;
   source_url: string | null;
+  /** Server-bounded plain-text preview of a text original; null for other kinds. */
+  excerpt: string | null;
   language: string | null;
   tags: string[];
   collections: string[];

@@ -143,7 +143,8 @@ when several users exist. Reprocessing never changes originals or notes.
 
 ## Listing and search
 
-List recent items newest first and page with the returned cursor; search ranks
+List recent items newest first and page with the returned cursor; text items carry
+an `excerpt` (at most 240 characters of plain text, `null` for other kinds); search ranks
 matches in titles, notes, URLs and extracted text and returns a snippet with the
 matched words between `«` and `»`. German and English words are stemmed for items
 whose language was detected, so `Tasche` finds `Taschen` and `book` finds `books`.

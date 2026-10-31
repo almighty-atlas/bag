@@ -4,13 +4,16 @@ from uuid import UUID
 
 from bag.config import Settings
 from bag.db import connection
+from bag.excerpt import SOURCE_CHARS, make_excerpt
 from bag.organize import COLLECTIONS_SQL, TAGS_SQL
 from bag.schemas import ItemPage, ItemSummary, SearchPage, SearchResult
 
 SUMMARY_COLUMNS = (
     "id, kind, source, title, user_note, mime_type, original_filename, source_url, language, "
     f"processing_status, created_at, captured_at, updated_at, deleted_at, {TAGS_SQL}, "
-    f"{COLLECTIONS_SQL}"
+    f"{COLLECTIONS_SQL}, "
+    # Only a bounded prefix of text originals leaves the database; see bag.excerpt.
+    f"CASE WHEN kind = 'text' THEN substr(content, 1, {SOURCE_CHARS}) END AS excerpt_source"
 )
 NAMED_FILTER = {
     "tag": (
@@ -35,6 +38,11 @@ HEADLINE_TEXT = (
     "coalesce(source_url, '') || E'\\n' || coalesce(extracted_text, '')"
 )
 HEADLINE_OPTIONS = "StartSel=«, StopSel=», MaxFragments=2, MaxWords=18, MinWords=6"
+
+
+def _summary(row: dict[str, Any]) -> dict[str, Any]:
+    source = row.pop("excerpt_source")
+    return {**row, "excerpt": make_excerpt(source)}
 
 
 def _filters(
@@ -105,7 +113,7 @@ def list_items(
             "ORDER BY id DESC LIMIT %(limit)s",
             params,
         ).fetchall()
-    items = [ItemSummary.model_validate(row) for row in rows[:limit]]
+    items = [ItemSummary.model_validate(_summary(row)) for row in rows[:limit]]
     next_cursor = items[-1].id if len(rows) > limit else None
     return ItemPage(items=items, next_cursor=next_cursor)
 
@@ -147,7 +155,7 @@ def search_items(
             "ORDER BY rank DESC, id DESC LIMIT %(limit)s OFFSET %(offset)s",
             {**params, "options": HEADLINE_OPTIONS},
         ).fetchall()
-    results = [SearchResult.model_validate(row) for row in rows[:limit]]
+    results = [SearchResult.model_validate(_summary(row)) for row in rows[:limit]]
     return SearchPage(
         results=results,
         next_offset=offset + limit if len(rows) > limit else None,

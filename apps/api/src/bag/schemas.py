@@ -184,6 +184,7 @@ class ItemSummary(BaseModel):
     mime_type: str | None
     original_filename: str | None
     source_url: str | None
+    excerpt: str | None
     language: str | None
     tags: list[str]
     collections: list[str]

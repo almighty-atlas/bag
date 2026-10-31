@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 
-import { ApiError, api, looksLikeUrl, organize, type ItemSummary, type NamedEntry } from "./api";
+import { ApiError, api, looksLikeUrl, organize, type NamedEntry } from "./api";
 import { EMPTY_FILTERS, href, type Filters, type Route } from "./app";
+import { feedText, type FeedItem } from "./feed-text";
 import { PendingShares, DISCARD_CONFIRMATION } from "./pending";
 import { CaptureKeys, uploadFiles, type PendingFile } from "./retry";
 import type { ShareDraft } from "./share";
 import { BatchGoneError, MissingFilesError, discardBatch, remainingFiles, saveBatch, type ShareBatch } from "./share-store";
 
-type Row = ItemSummary & { snippet?: string };
+type Row = FeedItem;
 
 const KIND_ICON: Record<string, string> = {
   text: "📝",
@@ -30,10 +31,6 @@ export function filterParams(filters: Filters): Record<string, string> {
     params["to"] = end.toISOString();
   }
   return params;
-}
-
-export function describe(item: ItemSummary): string {
-  return item.title ?? item.original_filename ?? item.source_url ?? item.user_note ?? item.kind;
 }
 
 /** What the capture form starts with: a pending share (stored batch) or only prefilled fields. */
@@ -164,45 +161,49 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
         <p class="hint">{route.trashed ? "Der Papierkorb ist leer." : "Noch nichts in der Tasche."}</p>
       )}
       <ul class="items">
-        {rows.map((row) => (
-          <li key={row.id} class="item-row">
-            {route.trashed && (
-              <button
-                type="button"
-                class="restore"
-                onClick={() => void api.restore(row.id).then(() => load(false))}
-              >
-                Wiederherstellen
-              </button>
-            )}
-            <a href={route.trashed ? undefined : href({ name: "item", id: row.id })} class="item">
-              <span class="icon" aria-hidden="true">
-                {KIND_ICON[row.kind] ?? "❔"}
-              </span>
-              <span class="body">
-                <span class="title">{describe(row)}</span>
-                {row.snippet !== undefined && <span class="snippet">{row.snippet}</span>}
-                {row.snippet === undefined && row.user_note && row.title && (
-                  <span class="snippet">{row.user_note}</span>
-                )}
-                <span class="meta">
-                  {new Date(row.captured_at).toLocaleString()} · {row.kind}
-                  {row.processing_status !== "ready" && <> · {row.processing_status}</>}
-                  {row.tags.map((tag) => (
-                    <a
-                      class="tag"
-                      key={tag}
-                      href={href({ ...route, filters: { ...route.filters, tag } })}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {tag}
-                    </a>
-                  ))}
+        {rows.map((row) => {
+          const text = feedText(row);
+          return (
+            <li key={row.id} class="item-row">
+              {route.trashed && (
+                <button
+                  type="button"
+                  class="restore"
+                  onClick={() => void api.restore(row.id).then(() => load(false))}
+                >
+                  Wiederherstellen
+                </button>
+              )}
+              <a href={route.trashed ? undefined : href({ name: "item", id: row.id })} class="item">
+                <span class="icon" aria-hidden="true">
+                  {KIND_ICON[row.kind] ?? "❔"}
                 </span>
-              </span>
-            </a>
-          </li>
-        ))}
+                <span class="body">
+                  <span class={text.headline === row.excerpt ? "title clamp" : "title"}>{text.headline}</span>
+                  {text.details.map((line) => (
+                    <span class={line === row.excerpt ? "snippet clamp" : "snippet"} key={line}>
+                      {line}
+                    </span>
+                  ))}
+                  <span class="meta">
+                    {new Date(row.captured_at).toLocaleString()} · {row.kind}
+                    {row.processing_status !== "ready" && <> · {row.processing_status}</>}
+                    {row.tags.map((tag) => (
+                      <a
+                        class="tag"
+                        key={tag}
+                        href={href({ ...route, filters: { ...route.filters, tag } })}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {tag}
+                      </a>
+                    ))}
+                  </span>
+                </span>
+              </a>
+            </li>
+          );
+        })}
       </ul>
       {next !== null && (
         <button type="button" onClick={() => void load(true)} disabled={loading}>
