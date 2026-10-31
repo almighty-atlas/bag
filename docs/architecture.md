@@ -12,12 +12,21 @@ filters for kind, tag, collection and capture date (kept in the hash route), a
 tags-and-collections page with rename and delete, and `/` to focus search.
 A service worker caches only the shell and hashed assets (network first for
 navigations, never `/api`). The Web Share Target posts to `/share`: the worker
-stores shared files in a cache and redirects to `#/share`, where the app prefills
-text and uploads the parked files with the user's note through the normal capture
-call, then clears the cache. Fetched HTML snapshots can be previewed in an iframe
+stores shared files in a cache and redirects to `#/share`, passing every non-empty
+`url`, `title` and `text` value (repeats included) as separate query fields. The
+app prefills the capture form from them: a valid HTTP(S) `url` field, otherwise
+the only distinct link found in title/text, becomes the content and is saved as a
+URL item; the remaining title and text, minus that link, prefill the visible,
+editable note. Without a link, or with several different links in free text, all
+values become one text capture. A GET `/share?…` maps onto the same route. The app
+then uploads the parked files with the note through the normal capture call and
+clears the cache. Nothing is saved until the user confirms "In die Tasche".
+Fetched HTML snapshots can be previewed in an iframe
 with an empty `sandbox` attribute and an injected CSP (`default-src 'none'`), so
-no script runs and no request leaves the page. Pure routing, share-parsing and
-CSP-injection helpers have vitest tests.
+no script runs and no request leaves the page. Routing, share classification and
+CSP-injection helpers have vitest tests; a vitest test runs the real `sw.js` on a
+multipart `POST /share` in Node and follows its redirect into the capture
+decision. That is not a browser or Android device test.
 
 Compose starts PostgreSQL 17, `bag-api`, `bag-worker` and `bag-web`. API and worker
 share a non-root image built from locked uv dependencies; `bag-web` is an nginx
@@ -230,11 +239,10 @@ evidence of implemented features. The following are source-level observations
 from the independent review, not verified runtime or device outcomes.
 See [TODO](../TODO.md) for actionable fixes and acceptance tests.
 
-- The POST Web Share Target worker concatenates URL, title and text with
-  newlines; the capture classifier accepts only single-line URLs. As a result
-  a shared link **may** become a text item when title and URL arrive together.
-  This needs a real Android POST-path test; a pure parsing helper test is
-  insufficient evidence.
+- Fixed and covered by the Node-based POST test above: the worker used to join
+  URL, title and text with newlines, so a link shared with a title became a
+  text capture. Which fields real Android browsers and apps send is still
+  unverified on a device.
 - Shared files are staged in fixed cache keys such as /shared/0 and
   /shared/count. Successive unconfirmed shares can replace the earlier
   selection; preservation/queueing and failure feedback are not implemented.

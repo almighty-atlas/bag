@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { looksLikeUrl } from "./api";
-import { EMPTY_FILTERS, FEED, href, parseRoute, sharedText } from "./app";
+import { EMPTY_FILTERS, FEED, href, parseRoute } from "./app";
 import { filterParams } from "./feed";
 
 describe("routes", () => {
@@ -14,8 +14,12 @@ describe("routes", () => {
       filters: { ...EMPTY_FILTERS, kind: "url", tag: "todo", from: "2026-09-01" },
     });
     expect(parseRoute("#/organize")).toEqual({ name: "organize" });
-    expect(parseRoute("#/share?text=hi&files=2")).toEqual({ name: "share", text: "hi", files: 2 });
-    expect(parseRoute("#/share?files=-3")).toEqual({ name: "share", text: "", files: 0 });
+    expect(parseRoute("#/share?text=hi&files=2")).toEqual({
+      name: "share",
+      payload: { url: [], title: [], text: ["hi"] },
+      files: 2,
+    });
+    expect(parseRoute("#/share?files=-3")).toEqual({ name: "share", payload: { url: [], title: [], text: [] }, files: 0 });
     expect(parseRoute("#/items/01a0de51-0fcc-7089-ae37-1a0e48153325")).toEqual({
       name: "item",
       id: "01a0de51-0fcc-7089-ae37-1a0e48153325",
@@ -32,7 +36,7 @@ describe("routes", () => {
       { name: "item", id: "01a0de51-0fcc-7089-ae37-1a0e48153325" } as const,
       { name: "organize" } as const,
       { name: "tokens" } as const,
-      { name: "share", text: "a&b", files: 1 } as const,
+      { name: "share" as const, payload: { url: ["https://example.org/?a=1&b"], title: ["T"], text: ["a&b", "c"] }, files: 1 },
     ]) {
       expect(parseRoute(href(route))).toEqual(route);
     }
@@ -56,17 +60,7 @@ describe("snapshot preview", () => {
   });
 });
 
-describe("share target", () => {
-  it("prefers the URL and falls back to title and text", () => {
-    expect(sharedText("/", "?text=x")).toBeNull();
-    expect(sharedText("/share", "?url=https%3A%2F%2Fexample.org%2Fa&text=ignored")).toBe(
-      "https://example.org/a",
-    );
-    expect(sharedText("/share", "?text=https%3A%2F%2Fexample.org%2Fb")).toBe("https://example.org/b");
-    expect(sharedText("/share", "?title=Titel&text=Ein%20Gedanke")).toBe("Titel\nEin Gedanke");
-    expect(sharedText("/share", "")).toBeNull();
-  });
-
+describe("link capture", () => {
   it("recognizes bare URLs for link capture", () => {
     expect(looksLikeUrl(" https://example.org/x?y=1 ")).toBe(true);
     expect(looksLikeUrl("https://example.org/x\nmore")).toBe(false);
