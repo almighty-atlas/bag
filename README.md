@@ -87,8 +87,10 @@ Both API and worker expose these endpoints.
 
 ## Processing and enrichment
 
-Update existing installations. This version adds a migration for the job queue, so
-run `bag migrate` before starting the new containers; until then `/ready` reports
+Update existing installations. This version adds a migration for the job queue and
+another (`0005_search_fields`) that re-indexes every item for filename and tag search
+in one transaction, so back up first, stop or idle the API and worker, and run
+`bag migrate` before starting the new containers; until then `/ready` reports
 `not_ready` on purpose. Tokens and data are preserved:
 
 ```sh
@@ -144,10 +146,15 @@ when several users exist. Reprocessing never changes originals or notes.
 ## Listing and search
 
 List recent items newest first and page with the returned cursor; text items carry
-an `excerpt` (at most 240 characters of plain text, `null` for other kinds); search ranks
-matches in titles, notes, URLs and extracted text and returns a snippet with the
-matched words between `«` and `»`. German and English words are stemmed for items
-whose language was detected, so `Tasche` finds `Taschen` and `book` finds `books`.
+an `excerpt` (at most 240 characters of plain text, `null` for other kinds); search covers
+titles, original filenames, assigned tag names, notes, URLs and extracted text. Titles and
+filenames rank above tags, tags above notes and URLs, and those above the body text; an
+exact title or filename comes first. A filename is searchable by its parts, so `rechnung`
+finds `rechnung-oktober-2026.pdf`, and tag changes apply immediately. Each result has a
+snippet with the matched words between `«` and `»` and `matched_fields`, the list of
+`title`, `filename`, `tag`, `note`, `url` and `content` in which a query word was found
+(empty if the result was found by exclusion only). German and English words are stemmed
+for items whose language was detected, so `Tasche` finds `Taschen` and `book` finds `books`.
 Quotes, `OR` and a leading `-` work as in web search engines:
 
 ```sh
@@ -159,7 +166,7 @@ curl --fail-with-body -sS -G "http://localhost:8000/api/v1/search" \
 ```
 
 Both endpoints accept `kind`, `status`, `from` and `to` (timezone-aware capture
-times) and `trashed=true`. Listings omit `content` and `extracted_text`; fetch the
+times), `tag`, `collection` and `trashed=true`. Listings omit `content` and `extracted_text`; fetch the
 item by ID for those. Snippets are plain text that clients must escape before
 rendering as HTML.
 

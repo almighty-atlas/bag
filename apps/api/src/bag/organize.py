@@ -12,6 +12,9 @@ from bag.schemas import NamedResponse
 Kind = Literal["tag", "collection"]
 LINK = {"tag": ("item_tag", "tag_id"), "collection": ("item_collection", "collection_id")}
 
+# Renaming or deleting a tag re-indexes every item that carries it, in the same transaction.
+REINDEX_TIMEOUT = "120s"
+
 # Correlated arrays for item responses; user, system and AI assignments alike.
 TAGS_SQL = (
     "(SELECT coalesce(array_agg(t.name ORDER BY t.name), '{}') FROM item_tag it "
@@ -76,6 +79,7 @@ def rename_named(
 ) -> NamedResponse | None:
     """Rename; None when the ID is not the owner's. Raises UniqueViolation on a clash."""
     with connection(settings) as conn:
+        conn.execute(f"SET LOCAL statement_timeout = '{REINDEX_TIMEOUT}'")
         row = conn.execute(
             f"UPDATE {kind} SET name = %s WHERE owner_id = %s AND id = %s RETURNING id",
             (name, owner_id, named_id),
@@ -89,6 +93,7 @@ def delete_named(settings: Settings, kind: Kind, owner_id: UUID, named_id: UUID)
     """Remove a name and all its assignments; items themselves are untouched."""
     link, column = LINK[kind]
     with connection(settings) as conn:
+        conn.execute(f"SET LOCAL statement_timeout = '{REINDEX_TIMEOUT}'")
         conn.execute(
             f"DELETE FROM {link} WHERE owner_id = %s AND {column} = %s", (owner_id, named_id)
         )

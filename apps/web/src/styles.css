@@ -69,6 +69,7 @@ button.danger { background: var(--danger); color: #fff; }
 .item .title { font-weight: 600; overflow-wrap: anywhere; }
 .snippet { color: var(--muted); font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .item .clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; white-space: normal; }
+.reasons { color: var(--muted); font-size: 12px; }
 .meta, .hint, .muted { color: var(--muted); font-size: 13px; }
 .tag { margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); }
 .error { color: var(--danger); }

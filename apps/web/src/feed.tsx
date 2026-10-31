@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 
-import { ApiError, api, looksLikeUrl, organize, type NamedEntry } from "./api";
+import { ApiError, api, looksLikeUrl, organize, type MatchedField, type NamedEntry } from "./api";
 import { EMPTY_FILTERS, href, type Filters, type Route } from "./app";
 import { feedText, type FeedItem } from "./feed-text";
+import { matchReasons } from "./match-reasons";
 import { PendingShares, DISCARD_CONFIRMATION } from "./pending";
 import { CaptureKeys, uploadFiles, type PendingFile } from "./retry";
 import type { ShareDraft } from "./share";
 import { BatchGoneError, MissingFilesError, discardBatch, remainingFiles, saveBatch, type ShareBatch } from "./share-store";
 
-type Row = FeedItem;
+type Row = FeedItem & { matched_fields?: MatchedField[] };
 
 const KIND_ICON: Record<string, string> = {
   text: "📝",
@@ -163,6 +164,7 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
       <ul class="items">
         {rows.map((row) => {
           const text = feedText(row);
+          const reasons = matchReasons(row.matched_fields);
           return (
             <li key={row.id} class="item-row">
               {route.trashed && (
@@ -185,6 +187,7 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
                       {line}
                     </span>
                   ))}
+                  {reasons && <span class="reasons">{reasons}</span>}
                   <span class="meta">
                     {new Date(row.captured_at).toLocaleString()} · {row.kind}
                     {row.processing_status !== "ready" && <> · {row.processing_status}</>}

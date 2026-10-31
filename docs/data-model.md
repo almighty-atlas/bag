@@ -1,8 +1,9 @@
 # Data model as built
 
 Migration `0001_foundation` creates the tables below; `0002_jobs` adds `job`,
-`0003_active_job` its unique active-job index and `0004_sessions` the web login
-columns and `session` table. All
+`0003_active_job` its unique active-job index, `0004_sessions` the web login
+columns and `session` table, and `0005_search_fields` the trigger-maintained weighted
+search vector (below). All
 have server-generated UUIDv7 primary keys. Timestamps use `timestamptz`; API
 connections use UTC. `user` is the ownership root; every other table has `owner_id`.
 
@@ -94,7 +95,7 @@ replaced on rerun), and merge a per-processor object into `item.metadata`
 `url_fetch.final_url`, `status`, `redirects`, `size_bytes`, `fetched_at` or
 `skipped` with the reason). They never modify
 `content`, `title`, `user_note`, blobs or relations. `extracted_text` is bounded to
-1 MiB; when its generated search vector still exceeds PostgreSQL's tsvector limit,
+1 MiB; when its search vector would exceed PostgreSQL's tsvector limit,
 the run fails permanently and `extracted_text` stays NULL. `language` holds ISO
 639-1 `de` or `en` and selects the stemming configuration of `search_vector`; the
 reserved marker `metadata.language.user = true` means the value was chosen by the
@@ -107,9 +108,15 @@ and concurrent captures could otherwise pick a duplicate as the earliest row.
 Items captured before `0002_jobs` keep `processing_status = ready` and have no runs
 or jobs until `bag reprocess` schedules the missing processors.
 
-The generated GIN-indexed `search_vector` combines simple and German/English text
-configurations over title, extracted text, URL and note. Search matches it against
-the OR of the query parsed in all three configurations. Listing pages by `id` in
+The GIN-indexed `search_vector` (ADR-0022) combines simple and German/English text
+configurations over title and original filename (weight A), assigned tag names (B),
+note and URL (C) and extracted text (D). Since `0005_search_fields` it is an ordinary
+column, not a generated one, because tags live in other tables: triggers on `item`,
+`item_tag` and `tag` recompute it in the transaction of every change, so application
+code never writes it. A tag change on an item whose vector would exceed the tsvector
+limit leaves the extracted text out of the vector instead of failing; other changes
+that do not touch the extracted text behave the same way. Search matches the vector
+against the OR of the query parsed in all three configurations. Listing pages by `id` in
 descending order, relying on the `(owner_id, id)` unique index and the UUIDv7 time
 ordering; `item_recent_idx` remains for future `created_at` ordering.
 
@@ -132,3 +139,11 @@ string IDs and ISO 8601 timestamps; tag assignments keep `created_by` and
 Downgrades drop tables and are destructive; use only on disposable test databases.
 Back up real data before migrations. Updating to `0002_jobs` or later requires running
 `bag migrate` before starting the new API and worker, which otherwise report not ready.
+
+`0005_search_fields` rewrites the search vector of every item in one transaction (it
+holds a lock on `item` meanwhile; expect roughly 2–3 ms per typical item, more for very
+large extracted texts), so run it with the API and worker stopped or idle. It needs no
+extension and no new configuration. Its downgrade restores the generated column from
+before and rewrites the table; tag and filename matching are lost again. The database
+needs a UTF-8 locale that lower-cases non-ASCII letters (the `postgres:17` image does);
+under a plain `C` locale umlaut handling in filenames and tags degrades.

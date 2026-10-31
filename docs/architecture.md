@@ -161,8 +161,8 @@ PNG, GIF, JPEG and WebP headers into `metadata.image_meta` without decoding, and
 `pdf_text` extracts the text layer of PDF originals with pypdf up to 1 MiB and
 2000 pages (ADR-0018); `language` falls back to extracted text on reruns, so
 `bag reprocess` after a PDF or page fetch also detects its language. Because
-`search_vector` is a generated column, extraction and language immediately make
-items searchable with the right stemmer. Every capture enqueues all processors
+`search_vector` is maintained by database triggers (ADR-0022), so extraction and
+language immediately make items searchable with the right stemmer. Every capture enqueues all processors
 regardless of kind; the worker log records claim and outcome with job, item, owner
 and processor IDs and the attempt number, never content or error details.
 
@@ -205,7 +205,7 @@ default daily, `0` disables) in a second thread that readiness also watches.
 `bag export <dir>` snapshots one owner's tables in a repeatable-read transaction
 into JSONL files plus a manifest, then copies every referenced original through the
 verified reader into `objects/<sha256>` with fsync. Trashed items are included;
-the generated search vector is not. The target must be empty, and any failed
+the search vector is not (imports rebuild it through the triggers). The target must be empty, and any failed
 verification aborts the run before the manifest is written. `bag import <dir>`
 reverses it for one owner: it checks the manifest version, hashes every object
 before touching the database, publishes objects through the content-addressed
@@ -218,11 +218,26 @@ reruns are no-ops and IDs owned by someone else are refused.
 `extracted_text`) newest first, paged by keyset on the UUIDv7 ID (`cursor` is the
 last ID of the previous page, `limit` 1–100). `GET /api/v1/search` parses `q` with
 `websearch_to_tsquery` (quotes, `OR`, `-`) in the `simple`, `german` and `english`
-configurations and matches the generated vector against their OR-combination, so
-stemming applies to items with a detected language while exact tokens match
-everywhere. Results carry `ts_rank_cd` and a plain-text `ts_headline` snippet over
-note, URL and extracted text with `«`/`»` markers; ordering is rank, then newest,
-paged by a bounded offset. Summaries of both endpoints carry `excerpt` (ADR-0021): for `kind = text` only, the
+configurations (hyphenated, underscored and dotted words also split into their
+parts) and matches the stored vector against their OR-combination, so stemming
+applies to items with a detected language while exact tokens match everywhere. The
+vector (ADR-0022, migration `0005_search_fields`) is an ordinary column that
+triggers keep exact in the transaction of every change: `BEFORE` on `item` for title,
+original filename, note, URL, extracted text and language, and statement-level
+`AFTER` triggers on `item_tag` (insert, delete, and updates that re-point an
+assignment: the previous and the new item are refreshed) and `tag` (rename), which
+refresh only the affected items of that owner under the item's row lock (`FOR NO KEY
+UPDATE`, in `(owner_id, item_id)` order). Weights: A title and
+filename, B tag names, C note and URL, D extracted text. Filenames and tags are
+indexed in all three configurations as written, split at separators and camelCase,
+and with umlauts transliterated, so `rechnung` finds `rechnung-oktober-2026.pdf`.
+Results are ordered by a tiered score (exact title or filename; query word in title
+or filename; in a tag; in note or URL), then the weighted `ts_rank`, then newest,
+paged by a bounded offset. Each result carries `rank`, a plain-text `ts_headline`
+snippet over title, note, URL and extracted text with `«`/`»` markers, and
+`matched_fields`: the subset of `title`, `filename`, `tag`, `note`, `url` and
+`content` (in that order) whose own text contains a positive query word, computed for
+the result page only; it is empty for results found by exclusion alone. Summaries of both endpoints carry `excerpt` (ADR-0021): for `kind = text` only, the
 query selects `substr(content, 1, 4096)` and `bag.excerpt.make_excerpt` reduces it to at
 most 240 characters of plain text (whitespace and line breaks collapsed, invisible and
 bidirectional control characters and common Markdown markers removed, cut on a word or
@@ -233,7 +248,7 @@ the summary. The web feed (`feed-text.ts`) shows title, else excerpt, else file 
 link, note or kind as the headline, and keeps a note or excerpt that is not the headline
 below it; search results show the match snippet. Both endpoints accept `kind`, `status`, `from`/`to`
 (capture time, timezone required) and `trashed`. Queries that reduce to nothing
-return no results rather than an error. Tag and collection filters exist in both listing and search; semantic search is not implemented. The generated search vector currently excludes original filenames and tag names, has no per-field weighting, and the search API returns a snippet but not a structured matched-field reason.
+return no results rather than an error. Tag and collection filters exist in both listing and search; semantic search is not implemented. The snippet does not cover filenames or tags (the reasons do), URL host and path words are indexed only as the parser tokenizes them, and compound words are not decomposed. The web feed shows `matched_fields` as a muted "Gefunden in: …" line (`match-reasons.ts`).
 
 `/health` needs no database; `/ready` requires the expected migration revision.
 FastAPI generates OpenAPI. Application logs are JSON with fixed event names and
@@ -279,7 +294,11 @@ publication, fsync failure, corruption, size limits and racing writers. Download
 disconnects are tested. Processing tests cover transactional enqueue, enrichment of
 text, files and URLs, bounded retries, backoff, lease expiry and stale results,
 concurrent workers executing every job exactly once, and permanent failure on the
-search vector limit. AI and complex extractors are not implemented.
+search vector limit. Search tests (`tests/test_search_fields.py`) cover filename
+spellings, tags added, removed, renamed and deleted (also through direct SQL, re-pointed
+assignments and concurrent transactions, including opposite moves without deadlock), German and English terms, tier ordering with a keyword-stuffed
+body, match reasons, owner isolation, trash, filters and pagination, a backfill across a
+real downgrade/upgrade of `0005`, import, and tag changes on a near-limit vector. AI and complex extractors are not implemented.
 
 ## Unimplemented product requirements and code-review checks (2026-10-31)
 
