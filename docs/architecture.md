@@ -93,7 +93,7 @@ exponential backoff from `BAG_JOB_RETRY_SECONDS`, capped at one hour, until
 Unexpected exceptions record only the exception class. Deterministic database limits
 such as the search vector size fail the run permanently instead of retrying.
 
-Three processors exist. `mime_detect` re-verifies files from stored bytes (signature
+Six registered processors exist: `mime_detect`, `text_extract`, `language`, `url_fetch`, `image_meta` and `pdf_text`. `mime_detect` re-verifies files from stored bytes (signature
 library plus a strict UTF-8 plain-text check), sets `mime_type` and re-derives file
 kinds; text items are `text/plain` and URLs are skipped. `text_extract` copies text
 originals and decodes UTF-8 text files up to 1 MiB into `extracted_text`, noting
@@ -174,8 +174,7 @@ everywhere. Results carry `ts_rank_cd` and a plain-text `ts_headline` snippet ov
 note, URL and extracted text with `«`/`»` markers; ordering is rank, then newest,
 paged by a bounded offset. Both endpoints accept `kind`, `status`, `from`/`to`
 (capture time, timezone required) and `trashed`. Queries that reduce to nothing
-return no results rather than an error. Tag and collection filters wait for those
-APIs; there is no semantic search.
+return no results rather than an error. Tag and collection filters exist in both listing and search; semantic search is not implemented. The generated search vector currently excludes original filenames and tag names, has no per-field weighting, and the search API returns a snippet but not a structured matched-field reason.
 
 `/health` needs no database; `/ready` requires the expected migration revision.
 FastAPI generates OpenAPI. Application logs are JSON with fixed event names and
@@ -222,3 +221,45 @@ disconnects are tested. Processing tests cover transactional enqueue, enrichment
 text, files and URLs, bounded retries, backoff, lease expiry and stale results,
 concurrent workers executing every job exactly once, and permanent failure on the
 search vector limit. AI and complex extractors are not implemented.
+
+## Unimplemented product requirements and code-review checks (2026-10-31)
+
+The [consolidated concept](concepts/product-concept-v0.2.md) and
+[revised delivery plan](spec.md#18-roadmap-and-implementation-order) are **not**
+evidence of implemented features. The following are source-level observations
+from the independent review, not verified runtime or device outcomes.
+See [TODO](../TODO.md) for actionable fixes and acceptance tests.
+
+- The POST Web Share Target worker concatenates URL, title and text with
+  newlines; the capture classifier accepts only single-line URLs. As a result
+  a shared link **may** become a text item when title and URL arrive together.
+  This needs a real Android POST-path test; a pure parsing helper test is
+  insufficient evidence.
+- Shared files are staged in fixed cache keys such as /shared/0 and
+  /shared/count. Successive unconfirmed shares can replace the earlier
+  selection; preservation/queueing and failure feedback are not implemented.
+- The web capture methods generate a new client_capture_id for each request.
+  This does not retain the ID for the same user's retry after an uncertain
+  response, even though server-side idempotent replay with one key exists.
+- Feed summaries do not carry text excerpts and can label text captures
+  simply as "text". There is no image paste handler, contextual
+  copy/share/pin function, or compact mobile-first Shelf surface.
+- Original and fetched content are delivered as protected downloads or
+  sandboxed snapshots; there are no decoded/re-encoded preview or thumbnail
+  blobs and no safe authenticated inline thumbnail endpoint. The six concept
+  mockups are design exploration, not built UI screenshots.
+- The relation table enforces owner-scoped foreign keys and directional
+  uniqueness but not a symmetric, no-self related_to constraint. There is
+  no relation API or UI.
+- URL fetching extracts HTML title and page text, not Open Graph, JSON-LD
+  or canonical identity. General field provenance and explicit user-empty
+  overrides are not implemented; reprocessing NULL-only defaults may
+  repopulate a user-cleared title.
+- Derived book/video entities, merkliste, galleries, CalDAV/CardDAV,
+  click-to-load video players, and multi-capture feed grouping are not
+  built. Their proposed schemas and semantics require separate ADRs
+  before implementation.
+
+These review observations must be retested against real clients and amended
+when code changes. Do not mark a product requirement "built" because it
+appears in the target spec.

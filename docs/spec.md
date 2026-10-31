@@ -2,7 +2,7 @@
 
 > A self-hosted, capture-first personal memory system. Drop anything in. Organize later. Retrieve by meaning.
 
-**Status:** target specification. Existing behavior is recorded in `docs/architecture.md`; future work is tracked in `TODO.md`. Not every planned platform interaction is implemented.
+**Status:** target specification, aligned with the [consolidated product concept v0.2](concepts/product-concept-v0.2.md) and the 2026-10-31 review. [Architecture](architecture.md) records existing behavior; [TODO](../TODO.md) tracks executable work. Review findings require tests and must not be presented as implemented fixes.
 
 This specification is written for the implementing agent (Claude Code, Codex or a human). Working rules, priorities and the definition of done live in [`AGENTS.md`](../AGENTS.md). Outstanding work lives in [`TODO.md`](../TODO.md).
 
@@ -106,10 +106,13 @@ A responsive interface with:
 - search with filters
 - item detail view with original-content open/download
 - notes, tags, collections
-- processing state and per-processor errors
+- processing state and user-understandable errors
+- contextual open, copy, share and original download actions
+- useful text excerpts, and safe server-derived image thumbnails rather than inline originals
+- a compact recent-items Shelf view and simple optional Merkliste/pinning
 - trash view with restore
 
-The PWA is also the initial mobile browsing interface.
+The PWA is also the initial mobile browsing interface. Clipboard paste (including supported image payloads) and repeated pending shares must not silently lose data. Real Android/macOS tests are required during Phase 3A; pure helper tests do not validate the POST Share Target.
 
 ### 3.4 Mobile
 
@@ -120,7 +123,7 @@ Do not build a floating desktop Shelf or require a native Android app.
 On Android, the installed Bag PWA already declares a Web Share Target for
 URLs, text and files. The current implementation **prefills** the capture UI
 and requires the user to confirm with **"In die Tasche"**; preserve that
-explicit durable-save boundary and test the full flow on a real device. The
+explicit durable-save boundary. Test the actual POST Share Target on Android for a URL together with title/text, files and successive unconfirmed shares, and verify correct URL classification. Do this in Phase 3A, not only during Phase 5. The
 mobile Shelf prioritizes recent items, opening links, copying text and
 downloading or sharing files. Browser upload/paste remains the fallback.
 
@@ -203,6 +206,8 @@ deleted_at          timestamptz nullable   soft delete
 
 Keep strongly typed columns for frequently queried fields. Put uncommon extractor or source metadata into `metadata`. Clients must not fail on an unknown `kind`.
 
+**Future entity/origin ADR:** Capture kind, recognized book/video/product identity and UI presentation are distinct concepts. A proposed origin field (capture, derived, external) plus item identifiers might reuse the existing Item model, but is not an approved migration. Compare this with a separate entity table before choosing. Each separate capture stays an independent item; avoid costly automatic multi-capture feed grouping in the MVP.
+
 ### 5.2 Blob
 
 An item owns zero or more binary objects: original file, fetched page snapshot, preview, thumbnail, future OCR artifact.
@@ -217,6 +222,8 @@ size_bytes    bigint
 mime_type     text
 created_at    timestamptz
 ```
+
+**Future thumbnail security boundary:** originals and fetched snapshots remain untrusted downloads or sandboxed content. Generated inline thumbnails require bounded image decoding and re-encoding, a distinct derived blob role, strict delivery headers/CSP and corrupted-image tests. Choose the library and limits in an ADR before implementing this.
 
 **Storage is content-addressed.** The storage key is derived from the SHA-256 of the content, for example `ab/cd/abcd…`. This gives deduplication for free, guarantees that user-supplied filenames never influence paths, and allows integrity checks on backup and restore. Two items may reference the same stored object; the object is only removed when no live or trashed blob references it.
 
@@ -238,6 +245,8 @@ created_by       user | system | ai
 confidence       nullable
 metadata         jsonb
 ```
+
+**First relation slice, after reliable capture and useful cards:** manually selected neutral links use related_to, are symmetric in the UI and reversible. Before implementation, define a migration/ADR forbidding self-links and reverse-order duplicates, preserving owner scoping, and specifying trash/restore and undo semantics. Keep system duplicate_of separate. The relation table exists; symmetric constraints, APIs and UI do not. Manual type selection, drag-and-drop gestures and galleries are deferred until the accessible linking dialog works.
 
 ### 5.6 ProcessingRun
 
@@ -354,7 +363,7 @@ The UI must always show that the item itself is saved, and which processors fail
 
 ## 8. Search and retrieval
 
-The MVP provides lexical search over title, extracted text, URL and note, with filters for tag, collection, kind and date range. Results are ranked and return snippets that show why an item matched.
+The usable core requires lexical search over title, extracted text, URL, note, original filename and assigned tags, with filters for tag, collection, kind and date. Rank titles/names above incidental body matches, and return a structured matching-field reason together with the text excerpt. Filename/tag indexing, field weighting and match reasons are planned, not existing capabilities. Keep search owner-scoped.
 
 ### 8.1 Multilingual full-text search
 
@@ -514,7 +523,12 @@ Prioritize data safety and capture reliability. Minimum coverage:
 - soft delete, restore and purge with storage garbage collection
 - database migrations up and, where feasible, down
 - authentication and owner scoping
-- search in German and English
+- search in German and English, including filename/tag matches and field-level reasons
+- browser-driven Android POST Share Target testing (URL plus title/text, image/file, repeated pending shares)
+- retry after lost capture response using the same client capture identifier
+- macOS/Android cross-device capture and text/image paste checks
+- thumbnail rendering with decoder limits, safe inline derived blobs and preserved attachment originals
+- symmetric owner-scoped relations, reverse-order deduplication and trash/restore/undo tests after its ADR
 - export round trip
 - API error behavior
 
@@ -524,75 +538,106 @@ Integration tests cover the complete path: `capture -> persisted item -> process
 
 Structured logs. Every capture and processing job is traceable through stable IDs (item id, run id, `client_capture_id`) without logging private content. Basic health and readiness endpoints. No heavyweight observability stack in the MVP.
 
-## 17. MVP scope
+## 17. MVP scope and release gates
 
-The first useful release is complete when a user can:
+The [consolidated concept](concepts/product-concept-v0.2.md) is the long-term product vision. This document defines an implementable sequence. References in earlier conceptual sections to relations in the "first release" mean the later neutral-relation slice; they do **not** block fixing unreliable capture first.
 
-1. run Bag of Holding through the documented self-hosted deployment
-2. open the Linux capture target
-3. drop a file, image, URL or text into the Bag
-4. see immediate confirmation after durable storage
-5. open the web UI and see captured items
-6. inspect an item, its original content, metadata and processing state
-7. search extracted text, titles, URLs and notes in German and English
-8. add or edit a note, tags and collections
-9. delete an item and restore it from the trash
-10. use the responsive UI from a phone
-11. restart and update the stack without losing stored data
-12. export the whole Bag to a directory
-13. retrieve a saved item on macOS or a phone after capturing it on Linux (and vice versa), using the existing server API
+**Gate A — reliable capture and retrieval (first):**
 
-**Not required for MVP:** LLM chat, embeddings, semantic search, automated AI organization, native macOS/Android apps, custom P2P transfer, LocalSend integration, a synchronized universal clipboard, live device push, a temporary Shelf datastore, browser extension or elaborate visual effects.
+1. Save originals durably; only confirm success after the server acknowledges persistence. Retain the same client capture identifier when retrying one failed/lost-response action; use a fresh identifier for an independently intended new capture.
+2. Fix/verify Android POST Share Target URL classification with simultaneous title/text, and preserve successive unconfirmed file shares. Test on a real Android device immediately.
+3. Show useful text excerpts and search by filename, tags and weighted fields with a visible matching-field reason.
+4. Test macOS/browser and Android save, refresh, search, download and original preservation; do not falsely acknowledge an offline capture.
 
-## 18. Roadmap
+**Gate B — useful cards and controls:**
 
-### Phase 0 — Foundation
+1. Safely re-encode image thumbnails and serve only these derived bytes inline; original/snapshot security boundaries stay unchanged.
+2. Provide type-specific open/copy/share/download, supported text/image paste, clearer error states, compact mobile Shelf navigation and a minimal optional Merkliste.
+3. Verify both normal and failure paths on the devices being used.
 
-Repository and tooling, `AGENTS.md`, architecture and data model docs, Compose environment, migrations, CI for lint, tests and build. See `TODO.md`.
+**Gate C — neutral relations before book/video entities:**
 
-### Phase 1 — Capture backend
+1. ADR/migration for owner-safe, symmetric, duplicate-free, non-self related_to links, reversible unlinking, and trash/restore semantics.
+2. Implement relation API and an accessible item-search/multi-select linking dialog, with two-way visibility and undo.
+3. Defer drag/drop, galleries, graph UI and manual semantic relation type pickers.
 
-Item model, blob storage abstraction, text, file and URL capture, durable response semantics, idempotency, token authentication.
+**Gate D — explainable link enrichment:**
 
-**Exit:** inputs can be captured through the API, replayed safely and survive a restart.
+1. Extract permitted Open Graph, canonical and JSON-LD page hints without mandatory external providers.
+2. Track provenance and user-field overrides, prevent reprocessing from replacing corrections, and show safe link cards and matching reasons.
+3. Derivative book/video identity needs a separate entity/origin/identifier ADR, not an assumed database migration.
 
-### Phase 2 — Processing and search
+**Explicitly outside the capture-first MVP:** rich-text editor, automatic multi-capture feed merging, price scraping, universal media player, AI chat, playlists, bidirectional DAV, custom P2P transport, and mandatory cloud services. This does not cancel the long-term vision.
 
-Job queue and worker, processors 1 to 6, processing runs, multilingual full-text search, search and filter API, soft delete and purge, export.
+**Device order:** Android and macOS checks begin in Gate A. The Linux Niri/DMS Shelf is a small API-based feasibility prototype after reliable capture, not a reason to postpone phone verification. A native mobile/macOS client is not required.
 
-**Exit:** captured content becomes searchable automatically without risking originals.
+## 18. Roadmap and implementation order
 
-### Phase 3 — Web / PWA
+Phases 0–2 below are the existing foundation; do not rebuild them. Phase 3 is divided into reviewable slices. Phase 4/5 retain the established Shared Shelf terminology and phase references.
 
-Feed, search, item detail, upload and paste, notes, tags, collections, processing and error state, trash, token management, PWA behavior.
+### Phase 0 — Foundation (already present)
 
-**Exit:** Bag is independently useful from a browser and a phone.
+Repository, backend/web tooling, Compose, migrations, docs and CI.
 
-### Phase 4 — Linux Shared Shelf
+### Phase 1 — Capture backend (already present)
 
-Validate a DMS 2.0 drop/popout prototype on Niri before choosing the final Linux
-client approach; fall back to GTK4 if necessary. Use the existing Bag API for
-capture and recent-items retrieval, with correct success/failure feedback and
-secure token storage. A local retry queue or native drag-out follows measured
-reliability/Wayland needs, not speculation.
+The item model, content-addressed originals, authenticated text/file/URL capture, durable server response and server-side replay idempotency. Client retry issues are fixed in Phase 3A.
 
-**Exit:** dropping an item into Bag on Linux is reliably persisted and the same
-item can be opened/downloaded on macOS through the existing web UI.
+### Phase 2 — Processing and search (already present)
 
-### Phase 5 — Mobile Shared Shelf
+PostgreSQL job queue, six registered processors, basic multilingual search, list and filters, soft delete, maintenance and export/import. Search gaps belong to Phase 3A.
 
-Test the existing Android PWA Share Target on a real device, improve its compact
-recent-items/search experience and contextual open/copy/download/share actions,
-and verify the complete Linux ↔ macOS ↔ Android capture/retrieval flows. Retain
-browser-upload fallback on unsupported platforms.
+### Phase 3A — Fix capture and retrieval first
 
-**Exit:** common phone content reaches Bag through native Share → Bag where
-supported, and stored items can be retrieved across devices without a new sync
-or peer-transfer service.
+- Correct and test the full Android POST Share Target, including URL plus title/text, files and repeated unconfirmed shares.
+- Keep one stable client capture ID across same-action retries; prove that a lost response cannot duplicate an item.
+- Show text excerpts, search by filename/tag with title weighting and return a matching-field reason.
+- Run macOS and Android real-device cross-device save/retrieve tests in this phase.
 
-### Phase 6 — Intelligence
+**Exit:** correct kind, no silent pending-share loss, no retry duplicates, trustworthy confirmation and useful retrieval.
 
-Only after the previous phases are stable: `pgvector`, embeddings provider abstraction, hybrid search, AI enrichment provider abstraction, summaries, tags, entities, relations, retrieval API for RAG and agents. Local and remote providers stay interchangeable.
+### Phase 3B — Safe visual cards and quick actions
+
+- Bound/re-encode server-generated image thumbnails; serve them inline through a dedicated authenticated route while preserving original attachment behavior.
+- Add paste of supported text/image content, copy/open/share/download, comprehensible processing messages, a compact mobile Shelf, and secondary tag/collection navigation.
+- Choose pin/Merkliste storage in a small ADR and make it work across devices.
+
+**Exit:** common media types are recognizable and useful on macOS and Android.
+
+### Phase 3C — Neutral linking
+
+- Decide symmetric relation uniqueness, self-link protection, undo and trash/restore in an ADR/migration.
+- Add owner-safe relation API, accessible link search/multi-select, two-way display and undo, with tests.
+- Do not require drag/drop or new entity tables.
+
+**Exit:** link and unlink two independent items safely without changing either original.
+
+### Phase 3D — Local link metadata and field provenance
+
+- Parse permitted Open Graph/JSON-LD/canonical hints securely; failure never loses the saved URL.
+- Keep user corrections on reprocess; show origin and matching field.
+- Do not require Amazon scraping, Google Books or any external enrichment provider.
+
+**Exit:** useful link cards without a derived book/video entity schema.
+
+### Phase 4 — Linux Shared Shelf (feasibility first)
+
+After the stable Phase 3A capture contract, validate DMS 2.0 on Niri for real drop/paste/popout, recent items and secure API credentials; retain GTK4 as fallback. Build only a small vertical slice. Test Linux-to-macOS capture/retrieval early. Wayland drag-out is optional and evidence-dependent.
+
+### Phase 5 — Mobile Shared Shelf and three-device acceptance
+
+Refine mobile ergonomics and re-test Android Share Target after Phase 3A/B changes. Confirm Linux, macOS and Android round trips, authentication failures, file limits, interrupted connections, and honest save feedback. Keep browser upload on unsupported phones.
+
+### After the stable core — independently approved extensions
+
+1. ISBN/Open Library book recognition (opt-in), video metadata and narrowly allowlisted click-to-load embeds after provenance/entity and CSP ADRs.
+2. Item drag-and-drop and galleries using ordered collections, after the accessible neutral relation dialog works.
+3. DAV-0: parse user-supplied .ics/.vcf files as preserved originals. Full read-only CalDAV/CardDAV sync is a separate opt-in project requiring secret handling, discovery, recurrence, ETags, identity and retention decisions. Writing comes even later.
+4. Semantic retrieval and optional AI (historical Phase 6) only after Phases 0–5 are stable under AGENTS.md.
+
+**Open ADRs before implementation choices:** relation/undo; entity origin and identifiers; user metadata overrides; thumbnail decoding and CSP; pin storage; gallery ordering; external provider consent; DAV data retention; whether text originals are editable/versioned.
+
+The TODO is the ordered execution queue. An open ADR is **not** authorization for an agent to guess and ship an irreversible schema or security decision.
 
 ## 19. Future AI layer
 
