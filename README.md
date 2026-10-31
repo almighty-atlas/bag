@@ -25,6 +25,7 @@ See [the agreed concept](docs/concepts/shared-shelf.md) for workflows and scope.
 | File | Purpose |
 |---|---|
 | [`docs/spec.md`](docs/spec.md) | Product vision, architecture, domain model, API, security, roadmap |
+| [`docs/concepts/product-concept-v0.2.md`](docs/concepts/product-concept-v0.2.md) | Consolidated product and UX concept (review v0.2), six desktop/mobile mockups, prioritized roadmap |
 | [`docs/concepts/shared-shelf.md`](docs/concepts/shared-shelf.md) | Agreed cross-device Shelf concept for Linux, macOS and Android; boundaries and rollout |
 | [`AGENTS.md`](AGENTS.md) | Working rules, priorities, conventions and definition of done for coding agents |
 | [`TODO.md`](TODO.md) | Actionable outstanding work, starting with Phase 0 |
