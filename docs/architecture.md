@@ -224,8 +224,10 @@ applies to items with a detected language while exact tokens match everywhere. T
 vector (ADR-0022, migration `0005_search_fields`) is an ordinary column that
 triggers keep exact in the transaction of every change: `BEFORE` on `item` for title,
 original filename, note, URL, extracted text and language, and statement-level
-`AFTER` triggers on `item_tag` (insert, delete) and `tag` (rename), which refresh
-only the affected items of that owner under the item's row lock. Weights: A title and
+`AFTER` triggers on `item_tag` (insert, delete, and updates that re-point an
+assignment: the previous and the new item are refreshed) and `tag` (rename), which
+refresh only the affected items of that owner under the item's row lock (`FOR NO KEY
+UPDATE`, in `(owner_id, item_id)` order). Weights: A title and
 filename, B tag names, C note and URL, D extracted text. Filenames and tags are
 indexed in all three configurations as written, split at separators and camelCase,
 and with umlauts transliterated, so `rechnung` finds `rechnung-oktober-2026.pdf`.
@@ -293,8 +295,8 @@ disconnects are tested. Processing tests cover transactional enqueue, enrichment
 text, files and URLs, bounded retries, backoff, lease expiry and stale results,
 concurrent workers executing every job exactly once, and permanent failure on the
 search vector limit. Search tests (`tests/test_search_fields.py`) cover filename
-spellings, tags added, removed, renamed and deleted (also through direct SQL and
-concurrent transactions), German and English terms, tier ordering with a keyword-stuffed
+spellings, tags added, removed, renamed and deleted (also through direct SQL, re-pointed
+assignments and concurrent transactions, including opposite moves without deadlock), German and English terms, tier ordering with a keyword-stuffed
 body, match reasons, owner isolation, trash, filters and pagination, a backfill across a
 real downgrade/upgrade of `0005`, import, and tag changes on a near-limit vector. AI and complex extractors are not implemented.
 

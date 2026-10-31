@@ -24,13 +24,23 @@ database maintains itself, in the transaction of the change:
 
 - a `BEFORE INSERT OR UPDATE OF title, original_filename, user_note, source_url,
   extracted_text, language` trigger on `item` recomputes the vector;
-- statement-level `AFTER INSERT` and `AFTER DELETE` triggers on `item_tag` and an
-  `AFTER UPDATE` trigger on `tag` (transition tables) refresh each affected item once
-  per statement; a rename only refreshes items of the renamed tag's own owner.
+- statement-level `AFTER INSERT`, `AFTER DELETE` and `AFTER UPDATE` triggers on
+  `item_tag` and an `AFTER UPDATE` trigger on `tag` (transition tables) refresh each
+  affected item once per statement; a rename only refreshes items of the renamed tag's
+  own owner. The `item_tag` update trigger compares the old and new
+  `(owner_id, item_id, tag_id)` triples of the statement (ignoring row identity) and
+  refreshes the previous and the new item of every assignment that changed; updates of
+  provenance, confidence or timestamps refresh nothing, nor does a statement that
+  changes no row. Triggers on `item_tag` cannot take a column list together with
+  transition tables, so the comparison does that filtering.
 
 Every lookup of tags and items is keyed by `(owner_id, id)`. The refresh takes the item
 row lock first and reads the tag list afterwards, so two concurrent tag changes on one
-item queue up instead of overwriting each other. The migration backfills every existing
+item queue up instead of overwriting each other. The lock is `FOR NO KEY UPDATE`: the
+foreign-key checks of concurrent `item_tag` writes hold `FOR KEY SHARE` on the item
+until commit, and `FOR UPDATE` deadlocks with them (reproduced by the swap test). Items
+of one statement are locked in `(owner_id, item_id)` order, so statements that touch
+the same items in opposite directions cannot deadlock either. The migration backfills every existing
 item (trashed ones too) in the same transaction. The application never writes the
 column. Exports do not contain it; imports rebuild it through the triggers.
 
@@ -74,9 +84,10 @@ Tag and filename changes cost one re-tokenization per affected item inside the
 request: about 2.5 ms for a typical 5 KB text and proportionally more for large
 documents. Renaming or deleting a tag used by thousands of large items can take
 seconds; those two requests therefore run with a 120 s statement timeout instead of 10 s.
-Downgrading restores a generated column and rewrites the table. Direct SQL that
-updates `item_tag.item_id` or `tag_id` in place is not tracked (the application never
-does this); insert and delete are. URL host and path words are still indexed only as
+Downgrading drops all triggers and functions, restores a generated column and rewrites
+the table. Direct SQL that re-points an assignment (`item_tag.item_id` or `tag_id`) is
+tracked like insert and delete; `TRUNCATE` of `item_tag` or `tag` is not (only tests do
+it). URL host and path words are still indexed only as
 the parser tokenizes them (`example.org` is one token; the word `budget` in
 `budget.example.org` is not separately searchable). Negation across the three
 configurations is as loose as in ADR-0011: `-word` can still return an item whose
