@@ -89,3 +89,5 @@ a.tag { text-decoration: none; color: inherit; }
 .preview { width: 100%; height: 60vh; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
 a.tag:hover { border-color: var(--accent); }
 .login h1 { margin: 0 0 6px; font-size: 22px; }
+.pending ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.pending h2 { margin: 0 0 8px; font-size: 15px; }

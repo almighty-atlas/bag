@@ -14,12 +14,18 @@ describe("routes", () => {
       filters: { ...EMPTY_FILTERS, kind: "url", tag: "todo", from: "2026-09-01" },
     });
     expect(parseRoute("#/organize")).toEqual({ name: "organize" });
-    expect(parseRoute("#/share?text=hi&files=2")).toEqual({
+    expect(parseRoute("#/share?text=hi")).toEqual({
       name: "share",
+      batch: null,
       payload: { url: [], title: [], text: ["hi"] },
-      files: 2,
     });
-    expect(parseRoute("#/share?files=-3")).toEqual({ name: "share", payload: { url: [], title: [], text: [] }, files: 0 });
+    const batch = "01a0de51-0fcc-7089-ae37-1a0e48153325";
+    expect(parseRoute(`#/share?batch=${batch}`)).toEqual({
+      name: "share",
+      batch,
+      payload: { url: [], title: [], text: [] },
+    });
+    expect(parseRoute("#/share?batch=../x")).toMatchObject({ name: "share", batch: null });
     expect(parseRoute("#/items/01a0de51-0fcc-7089-ae37-1a0e48153325")).toEqual({
       name: "item",
       id: "01a0de51-0fcc-7089-ae37-1a0e48153325",
@@ -36,7 +42,8 @@ describe("routes", () => {
       { name: "item", id: "01a0de51-0fcc-7089-ae37-1a0e48153325" } as const,
       { name: "organize" } as const,
       { name: "tokens" } as const,
-      { name: "share" as const, payload: { url: ["https://example.org/?a=1&b"], title: ["T"], text: ["a&b", "c"] }, files: 1 },
+      { name: "share" as const, batch: null, payload: { url: ["https://example.org/?a=1&b"], title: ["T"], text: ["a&b", "c"] } },
+      { name: "share" as const, batch: "01a0de51-0fcc-7089-ae37-1a0e48153325", payload: { url: [], title: [], text: [] } },
     ]) {
       expect(parseRoute(href(route))).toEqual(route);
     }

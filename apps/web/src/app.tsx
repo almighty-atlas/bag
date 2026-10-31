@@ -6,6 +6,7 @@ import { ItemView } from "./item";
 import { Login } from "./login";
 import { Organize } from "./organize";
 import { SHARE_FIELDS, shareDraft, sharePayload, type SharePayload } from "./share";
+import { batchDraft, loadBatch, type ShareBatch } from "./share-store";
 import { Tokens } from "./tokens";
 
 export interface Filters {
@@ -24,13 +25,15 @@ export type Route =
   | { name: "item"; id: string }
   | { name: "organize" }
   | { name: "tokens" }
-  | { name: "share"; payload: SharePayload; files: number };
+  // A stored pending share (batch), or the legacy GET form that carries its fields in the URL.
+  | { name: "share"; batch: string | null; payload: SharePayload };
 
 export type FeedRoute = Extract<Route, { name: "feed" }>;
 
 export const FEED: FeedRoute = { name: "feed", query: "", trashed: false, filters: EMPTY_FILTERS };
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const BATCH_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export function parseRoute(hash: string): Route {
   const [path = "", search = ""] = hash.replace(/^#/, "").split("?");
@@ -40,8 +43,8 @@ export function parseRoute(hash: string): Route {
   if (path === "/tokens") return { name: "tokens" };
   if (path === "/organize") return { name: "organize" };
   if (path === "/share") {
-    const files = Number.parseInt(params.get("files") ?? "0", 10);
-    return { name: "share", payload: sharePayload(params), files: Number.isFinite(files) ? Math.max(files, 0) : 0 };
+    const batch = params.get("batch") ?? "";
+    return { name: "share", batch: BATCH_ID.test(batch) ? batch : null, payload: sharePayload(params) };
   }
   const date = (key: string) => {
     const value = params.get(key) ?? "";
@@ -64,7 +67,7 @@ export function parseRoute(hash: string): Route {
 /** Hash route for a GET share (/share?title=&text=&url=), so it follows the POST path; else null. */
 export function sharedRoute(pathname: string, search: string): string | null {
   if (pathname !== "/share") return null;
-  return href({ name: "share", payload: sharePayload(new URLSearchParams(search)), files: 0 });
+  return href({ name: "share", batch: null, payload: sharePayload(new URLSearchParams(search)) });
 }
 
 export function href(route: Route): string {
@@ -73,10 +76,12 @@ export function href(route: Route): string {
   if (route.name === "organize") return "#/organize";
   if (route.name === "share") {
     const params = new URLSearchParams();
-    for (const name of SHARE_FIELDS) {
-      for (const value of route.payload[name]) params.append(name, value);
+    if (route.batch) params.set("batch", route.batch);
+    else {
+      for (const name of SHARE_FIELDS) {
+        for (const value of route.payload[name]) params.append(name, value);
+      }
     }
-    if (route.files) params.set("files", String(route.files));
     return `#/share?${params}`;
   }
   const params = new URLSearchParams();
@@ -141,11 +146,32 @@ export function App() {
         {route.name === "item" && <ItemView id={route.id} />}
         {route.name === "tokens" && <Tokens />}
         {route.name === "organize" && <Organize />}
-        {route.name === "feed" && <Feed route={route} prefill={null} sharedFiles={0} />}
-        {route.name === "share" && (
-          <Feed route={FEED} prefill={shareDraft(route.payload)} sharedFiles={route.files} />
-        )}
+        {route.name === "feed" && <Feed route={route} share={null} />}
+        {route.name === "share" && <SharePage batch={route.batch} payload={route.payload} />}
       </main>
     </>
   );
+}
+
+/** Opens the capture form on a pending share; an unknown or already finished batch says so. */
+function SharePage({ batch, payload }: { batch: string | null; payload: SharePayload }) {
+  const [loaded, setLoaded] = useState<ShareBatch | null | undefined>(batch ? undefined : null);
+  useEffect(() => {
+    if (!batch) return;
+    setLoaded(undefined);
+    loadBatch(batch)
+      .then(setLoaded)
+      .catch(() => setLoaded(null));
+  }, [batch]);
+  if (loaded === undefined) return <p>Lade…</p>;
+  if (batch === null) return <Feed route={FEED} share={{ batch: null, draft: shareDraft(payload) }} />;
+  if (loaded === null) {
+    return (
+      <>
+        <p class="hint">Dieser geteilte Inhalt ist nicht mehr offen: gespeichert oder verworfen.</p>
+        <Feed route={FEED} share={null} />
+      </>
+    );
+  }
+  return <Feed key={loaded.id} route={FEED} share={{ batch: loaded, draft: batchDraft(loaded) }} />;
 }

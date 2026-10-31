@@ -11,36 +11,63 @@ processing state, reprocess, trash with restore, client token management, feed
 filters for kind, tag, collection and capture date (kept in the hash route), a
 tags-and-collections page with rename and delete, and `/` to focus search.
 A service worker caches only the shell and hashed assets (network first for
-navigations, never `/api`). The Web Share Target posts to `/share`: the worker
-stores shared files in a cache and redirects to `#/share`, passing every non-empty
-`url`, `title` and `text` value (repeats included) as separate query fields. The
-app prefills the capture form from them: a valid HTTP(S) `url` field, otherwise
-the only distinct link found in title/text, becomes the content and is saved as a
-URL item; the remaining title and text, minus that link, prefill the visible,
-editable note. Without a link, or with several different links in free text, all
-values become one text capture. A GET `/share?…` maps onto the same route. The app
-then uploads the parked files with the note through the normal capture call and
-clears the cache. Nothing is saved until the user confirms "In die Tasche".
-Web captures keep one `client_capture_id` per logical capture (`retry.ts`): the
-key belongs to the exact payload (kind, text or URL, note; for a file the picked
-`File` object and note, for a shared file the random `X-Bag-Share-Id` the worker
-stores with each received file, plus the note; entries without it get a fresh key
-per attempt) and is dropped only after the server confirmed it. Equal name, size
-and type never make two files share a key. Resending unchanged
-input after a failed or unanswered request replays the same key, so the server
-returns the stored item instead of a duplicate; edited input, a newly picked file
-or a repeat after a confirmed save gets a new key, because the server would
-otherwise answer a reused key with the first item. Text sent together with shared
-files is confirmed only after all files succeed. A file batch stops at the first
+navigations, never `/api`; on activation it deletes only stale shell caches, never
+the `bag-share` cache). The Web Share Target posts to `/share`: the worker stores
+the whole share as one batch with a random batch ID in the `bag-share` cache:
+`/shared/<batch>/<file-id>` per file (random file ID, bytes, MIME type) and
+`/shared/<batch>/meta` (JSON with batch ID, time, every non-empty `url`, `title`
+and `text` value, repeats included, and the file list with IDs, names, types and
+sizes). Files are written first and meta last, so a batch without meta was never
+acknowledged; if writing fails, the partial batch is removed and the request fails
+rather than redirecting. Batches never share a key, so later or concurrent shares
+cannot overwrite earlier ones. The worker redirects to `#/share?batch=<id>`.
+The app opens that batch in the capture form: a valid HTTP(S) `url` field,
+otherwise the only distinct link found in title/text, becomes the content and is
+saved as a URL item; the remaining title and text, minus that link, prefill the
+visible, editable note. Without a link, or with several different links in free
+text, all values become one text capture. A legacy GET `/share?…` maps onto the same
+form with its fields inline, without a stored batch. The feed lists all other
+unsaved batches under "Noch nicht gespeichert" with "Öffnen und speichern" and
+"Verwerfen" (asks for confirmation); the open batch also has "Verwerfen".
+Saving ("In die Tasche") sends the content, then each remaining file in order. After
+the server confirmed a file, a marker `/shared/<batch>/<file-id>.saved` is written
+and only then the file bytes are deleted, so missing bytes alone never mean
+"saved". A file with neither bytes nor marker was lost (e.g. cache eviction): it
+is skipped, the other files are still saved, and the save ends with an error that
+names it ("nicht mehr auf diesem Gerät vorhanden und nie gespeichert"); the batch
+stays and the list shows how many files are gone. The batch (meta last, with all
+markers) is deleted only after every file is confirmed or on an explicit discard;
+any failure keeps the batch. Saves of one batch are serialized (Web Locks where
+available, otherwise a queue within the page) and re-read the batch, so a
+concurrent second save neither resends confirmed files nor reports a false
+success: if the batch is already saved or discarded it ends with "nicht mehr
+offen". The Web Locks branch itself is not covered by the Node tests. If the user clears the content field
+and saves only the files, the original shared text is discarded with the batch.
+Capture IDs of a batch are derived (SHA-256 of batch ID, file ID or content, kind
+and note, formatted as a UUID), so they are identical after a page reload: an
+unanswered request is replayed with the same key and creates no duplicate, while
+edited content or note gets a different key. Other web captures keep one
+`client_capture_id` per logical capture in memory (`retry.ts`): the key belongs to
+the exact payload (kind, text or URL, note; for a picked file the `File` object and
+note) and is dropped once the server confirmed it. Resending unchanged input after
+a failed or unanswered request replays the same key, so the server returns the
+stored item instead of a duplicate; edited input, a newly picked file or a repeat
+after a confirmed save gets a new key, because the server would otherwise answer a
+reused key with the first item. A batch of picked files stops at the first
 unconfirmed upload and lists the rest with "Erneut versuchen" (same files, notes
-and keys; confirmed files are not resent) or "Verwerfen". Keys live in the page's
-memory: a reload or new page starts fresh keys.
+and keys; confirmed files are not resent) or "Verwerfen"; these in-memory keys do
+not survive a reload.
 Fetched HTML snapshots can be previewed in an iframe
 with an empty `sandbox` attribute and an injected CSP (`default-src 'none'`), so
 no script runs and no request leaves the page. Routing, share classification and
-CSP-injection helpers have vitest tests; a vitest test runs the real `sw.js` on a
-multipart `POST /share` in Node and follows its redirect into the capture
-decision. That is not a browser or Android device test.
+CSP-injection helpers have vitest tests. Further vitest tests run the real `sw.js`
+in Node against an in-memory CacheStorage with multipart `POST /share` requests:
+consecutive and concurrent shares, a failing cache write, install/activate over
+old caches, and saving batches against a fake server that replays known keys
+(lost responses, network errors, partial failures, reopening). They do not cover
+the Preact components (no DOM test environment) and are not a browser or Android
+device test. Shares stashed by the previous worker version under `/shared/<n>`
+and `/shared/count` are not migrated and do not appear in the list.
 
 Compose starts PostgreSQL 17, `bag-api`, `bag-worker` and `bag-web`. API and worker
 share a non-root image built from locked uv dependencies; `bag-web` is an nginx
@@ -257,9 +284,11 @@ See [TODO](../TODO.md) for actionable fixes and acceptance tests.
   URL, title and text with newlines, so a link shared with a title became a
   text capture. Which fields real Android browsers and apps send is still
   unverified on a device.
-- Shared files are staged in fixed cache keys such as /shared/0 and
-  /shared/count. Successive unconfirmed shares can replace the earlier
-  selection; preservation/queueing and failure feedback are not implemented.
+- Fixed: shared files used to be staged in fixed cache keys (/shared/0,
+  /shared/count) and the activate handler deleted every cache but the shell, so a
+  second share or an app update could destroy an unsaved one. Batches and the
+  activate handler are verified by the Node tests above, not on a device; whether
+  Android/Chrome keeps the cache under storage pressure is unverified.
 - Fixed: the web capture methods used to generate a new client_capture_id for
   each request. Retries of the same payload now reuse it (see above), verified
   by vitest tests against a fake idempotent server, not on a real network or
