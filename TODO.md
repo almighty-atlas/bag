@@ -31,10 +31,6 @@ Shelf is a view over persisted Bag items, not a second transport/store.
       (/shared/0 and /shared/count) with per-share batches or a safe queue.
       A second share before confirming the first must not silently destroy
       either selection. Define explicit discard/recovery feedback and tests.
-- [ ] **Stable client retry ID:** reuse the same client_capture_id for the
-      same text/URL/file operation after a timeout or lost response. Start a
-      new ID only when the user deliberately creates a separate capture.
-      Test duplicate-free retries and accurate confirmed/failed states.
 - [ ] **Text excerpt in recent feed:** show meaningful bounded text
       previews when no title or note exists; preserve API auth, paging and
       sane truncation for large Unicode input.
@@ -44,7 +40,9 @@ Shelf is a view over persisted Bag items, not a second transport/store.
       tests. Keep existing tag/collection filters working.
 - [ ] **Immediate real-device smoke test:** Android Share→Bag; macOS browser
       paste/save→Bag; refresh and retrieve from a second device. Cover
-      interrupted upload, auth expiry, server restart and accurate success.
+      interrupted upload, auth expiry, server restart and accurate success,
+      including that retrying an unanswered text/URL/file save (stable client
+      retry ID, built and unit-tested) creates no duplicate.
 
 **3A done when:** no silent share loss, wrongly categorized URL, false
 save acknowledgement or unintended same-action retry duplicate; text and

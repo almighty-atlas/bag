@@ -112,20 +112,21 @@ export const api = {
   processing: (id: string) => request<ProcessingRun[]>(`/api/v1/items/${encodeURIComponent(id)}/processing`),
   reprocess: (id: string) =>
     request<ProcessingRun[]>(`/api/v1/items/${encodeURIComponent(id)}/reprocess`, { method: "POST" }),
-  captureText: (content: string, userNote: string | null) =>
+  // Callers pass the key so a retry of the same capture replays it instead of duplicating (see retry.ts).
+  captureText: (content: string, userNote: string | null, clientCaptureId: string) =>
     request<CaptureResult>("/api/v1/capture/text", {
       method: "POST",
-      body: JSON.stringify({ content, user_note: userNote, source: "web", client_capture_id: crypto.randomUUID() }),
+      body: JSON.stringify({ content, user_note: userNote, source: "web", client_capture_id: clientCaptureId }),
     }),
-  captureUrl: (url: string, userNote: string | null) =>
+  captureUrl: (url: string, userNote: string | null, clientCaptureId: string) =>
     request<CaptureResult>("/api/v1/capture/url", {
       method: "POST",
-      body: JSON.stringify({ url, user_note: userNote, source: "web", client_capture_id: crypto.randomUUID() }),
+      body: JSON.stringify({ url, user_note: userNote, source: "web", client_capture_id: clientCaptureId }),
     }),
-  captureFile: (file: File, userNote: string | null) => {
+  captureFile: (file: File, userNote: string | null, clientCaptureId: string) => {
     const form = new FormData();
     form.append("file", file, file.name);
-    form.append("metadata", JSON.stringify({ user_note: userNote, source: "web", client_capture_id: crypto.randomUUID() }));
+    form.append("metadata", JSON.stringify({ user_note: userNote, source: "web", client_capture_id: clientCaptureId }));
     return request<CaptureResult>("/api/v1/capture/file", { method: "POST", body: form });
   },
   update: (id: string, patch: Partial<Pick<ItemDetail, "title" | "user_note" | "language" | "tags" | "collections">>) =>
