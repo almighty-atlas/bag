@@ -42,9 +42,13 @@ export interface ItemDetail {
   updated_at: string;
 }
 
+/** A field in which a search result contains at least one query word. */
+export type MatchedField = "title" | "filename" | "tag" | "note" | "url" | "content";
+
 export interface SearchResult extends ItemSummary {
   rank: number;
   snippet: string;
+  matched_fields: MatchedField[];
 }
 
 export interface ProcessingRun {
