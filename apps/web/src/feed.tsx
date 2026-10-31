@@ -8,6 +8,7 @@ import { PendingShares, DISCARD_CONFIRMATION } from "./pending";
 import { CaptureKeys, uploadFiles, type PendingFile } from "./retry";
 import type { ShareDraft } from "./share";
 import { BatchGoneError, MissingFilesError, discardBatch, remainingFiles, saveBatch, type ShareBatch } from "./share-store";
+import { Thumbnail, previewState, thumbnailAlt } from "./thumbnail";
 
 type Row = FeedItem & { matched_fields?: MatchedField[] };
 
@@ -165,6 +166,8 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
         {rows.map((row) => {
           const text = feedText(row);
           const reasons = matchReasons(row.matched_fields);
+          const preview = previewState(row, { trashed: route.trashed || row.deleted_at !== null });
+          const withThumb = preview !== "none" && preview !== "trashed";
           return (
             <li key={row.id} class="item-row">
               {route.trashed && (
@@ -176,10 +179,17 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
                   Wiederherstellen
                 </button>
               )}
-              <a href={route.trashed ? undefined : href({ name: "item", id: row.id })} class="item">
-                <span class="icon" aria-hidden="true">
-                  {KIND_ICON[row.kind] ?? "❔"}
-                </span>
+              <a
+                href={route.trashed ? undefined : href({ name: "item", id: row.id })}
+                class={withThumb ? "item with-thumb" : "item"}
+              >
+                {withThumb ? (
+                  <Thumbnail key={row.id} id={row.id} alt={thumbnailAlt(row)} state={preview} variant="card" />
+                ) : (
+                  <span class="icon" aria-hidden="true">
+                    {KIND_ICON[row.kind] ?? "❔"}
+                  </span>
+                )}
                 <span class="body">
                   <span class={text.headline === row.excerpt ? "title clamp" : "title"}>{text.headline}</span>
                   {text.details.map((line) => (

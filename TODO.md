@@ -63,11 +63,21 @@ retrieval is done and tested; the client check is the open item above).
 - [x] **Image preview pipeline, backend:** `thumbnail` processor, authenticated
       owner-scoped `GET /api/v1/items/{id}/thumbnail`, corruption, bomb and
       tamper tests.
-- [ ] **Image preview UI:** responsive image cards and details that use the
-      thumbnail endpoint, with a visible fallback on `404` or a failed or
-      skipped `thumbnail` run. Decide whether listing summaries should say
-      whether a thumbnail exists (today only the endpoint and the processing
-      run reveal it). Check in a real browser on macOS and Android.
+- [x] **Image preview UI:** responsive image cards in feed and search and a
+      larger preview in the detail view, using only the thumbnail endpoint, with
+      readable fallbacks for loading, `404`, damaged, skipped, failed and
+      still-processing thumbnails; `thumbnail_available` on summaries and
+      details (ADR-0023). Component tests and one headless Chromium pass.
+- [ ] **Image preview follow-ups:**
+      - Check the cards and detail on real macOS and Android browsers (only
+        headless Chromium on Linux at 1280 and 390 px was used).
+      - The feed does not refresh itself: a card that says "Vorschau wird
+        erstellt…" changes after a reload or a new search (the detail view
+        polls up to 15 times).
+      - The phone feed scrolls horizontally by about 10 px apparently because the capture
+        textarea is wider than its card (existing, unrelated to previews).
+      - Fallback wording cannot say why a skipped preview is missing: the
+        API does not expose the `skipped` reason.
 - [ ] **Thumbnail follow-ups:** measure worker memory on the production host
       against ADR-0023's 1 GiB child limit; decide on HEIC/AVIF and color
       profile handling if real captures need them.

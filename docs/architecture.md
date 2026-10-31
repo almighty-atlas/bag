@@ -295,15 +295,38 @@ invalid blob is `404` even when `If-None-Match` matches. Responses carry
 `image/webp`, `nosniff`, a
 `default-src 'none'; sandbox` CSP, `Cross-Origin-Resource-Policy: same-origin`,
 `Cache-Control: private, no-cache` and a content-hash `ETag` (`304` on a matching
-`If-None-Match`). The item and listing JSON are unchanged; whether a thumbnail
-exists is visible only through this endpoint and the `thumbnail` processing run
-(`skipped` runs carry `metadata.reason`). Rendering limits and the child process
+`If-None-Match`). Item details, listings and search results carry a boolean
+`thumbnail_available` (ADR-0023), computed in the same owner-scoped query by an
+`EXISTS` over the item's `thumbnail` blob row (indexed by owner and item; no extra
+request per card, also for search pages). It applies the endpoint's row checks (role,
+`image/webp`, at most 256 KiB) but not the object, integrity or trash checks, so it
+is a hint: it can be `true` for a trashed item or a missing object, and clients must
+still handle `404`. The `thumbnail` processing run tells more (`skipped` runs carry
+`metadata.reason`, which the API does not expose). Rendering limits and the child process
 are described in ADR-0023; neither the original nor a stored thumbnail is ever
 decoded in the API process. That a thumbnail's pixels decode is established when it
 is written: the renderer decodes its own output in the child, and `bag import`
 checks every imported thumbnail in limited child processes and leaves out invalid
 ones (`invalid_thumbnails` in the counts).
 A rerun replaces the row; the previous object stays until `bag gc`.
+
+Web previews (`apps/web/src/thumbnail.tsx`): image cards in the feed and search
+results, and the item detail, show `<img src="/api/v1/items/{id}/thumbnail">` with
+`loading="lazy"`; the session cookie authenticates it, nothing else is ever an image
+source (no original, no external URL, no URL token). The state comes from the summary
+alone: `thumbnail_available` leads to a request; otherwise a queued or processing
+image says "Vorschau wird erstellt…" and any other says "Keine Vorschau verfügbar",
+both without a request. Trashed rows (decided per row from `deleted_at`, so a stale
+list under a new route cannot leak a request) and non-image kinds never request one.
+A failed load swaps the image for "Vorschau konnte nicht geladen werden" in that
+card only; the detail view adds that the original is stored unchanged, still offers
+"Original herunterladen" and the whole edit form, and reads the item's `thumbnail` run
+to tell "wird erstellt", "konnte nicht erstellt werden" and "keine Vorschau". While a
+detail view waits for a preview it checks again every 4 s, at most 15 times, updating
+only the preview's inputs (never the form fields). The feed does not refresh itself.
+Feed frames are 168 x 126 px beside the text from 560 px width and full width by 180
+px above it on phones, with `object-fit: contain`; the detail shows the picture at its
+own size, never enlarged, up to 512 px.
 
 Crashes may leave unpublished `.upload-*` files or published objects without a
 database reference. They are retained until `bag gc` removes them under the
@@ -354,15 +377,17 @@ See [TODO](../TODO.md) for actionable fixes and acceptance tests.
   and search), verified by Python unit tests of the excerpt function, PostgreSQL
   integration tests (paging, kind filter, search, trash, owner scoping,
   authentication, multi-megabyte originals) and vitest tests of the line selection.
-  The Preact feed component itself has no DOM test and the layout (two-line clamp)
-  was not checked in a browser. There is still no image paste handler, contextual
+  The image cards and detail view have vitest component tests (happy-dom, mocked
+  fetch); the text-card two-line clamp has none and was not checked in a browser.
+  There is still no image paste handler, contextual
   copy/share/pin function, or compact mobile-first Shelf surface.
 - Original and fetched content are delivered as protected downloads or
   sandboxed snapshots. Images additionally get a re-encoded WebP thumbnail and
-  an authenticated inline endpoint (ADR-0023; backend only, verified by Python
-  tests). No web UI shows thumbnails yet, nothing was checked in a browser or on
-  a device, and listing responses do not announce whether a thumbnail exists.
-  The six concept mockups are design exploration, not built UI screenshots.
+  an authenticated inline endpoint (ADR-0023). The web feed, search results and item
+  detail show it (see Thumbnails; vitest component tests and Python integration tests
+  for `thumbnail_available`). The layout was checked once in headless Chromium 155
+  (Linux/musl) at 1280 and 390 px width against a seeded local Bag; no macOS, Android
+  or other real-device check has happened. The six concept mockups are design exploration, not built UI screenshots.
 - The relation table enforces owner-scoped foreign keys and directional
   uniqueness but not a symmetric, no-self related_to constraint. There is
   no relation API or UI.

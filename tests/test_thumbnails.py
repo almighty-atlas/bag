@@ -851,4 +851,7 @@ def test_existing_features_keep_working_next_to_thumbnails(
     assert_attachment_only(client, headers, pdf)
     assert_attachment_only(client, headers, image)
     item = client.get(f"/api/v1/items/{image}", headers=headers).json()
-    assert "thumbnail" not in json.dumps(item).lower() and item["mime_type"] == "image/png"
+    # The only trace of the derived blob in item JSON is the boolean hint, never keys or hashes.
+    assert item["thumbnail_available"] is True and item["mime_type"] == "image/png"
+    others = {key: value for key, value in item.items() if key != "thumbnail_available"}
+    assert "thumbnail" not in json.dumps(others).lower()

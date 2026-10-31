@@ -170,6 +170,8 @@ class ItemResponse(BaseModel):
     tags: list[str]
     collections: list[str]
     processing_status: str
+    # Whether GET /items/{id}/thumbnail has a stored preview to try; see bag.preview.
+    thumbnail_available: bool
     created_at: datetime
     captured_at: datetime
     updated_at: datetime
@@ -189,6 +191,7 @@ class ItemSummary(BaseModel):
     tags: list[str]
     collections: list[str]
     processing_status: str
+    thumbnail_available: bool
     created_at: datetime
     captured_at: datetime
     updated_at: datetime

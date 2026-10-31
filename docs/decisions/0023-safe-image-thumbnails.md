@@ -1,7 +1,7 @@
 # ADR-0023: Re-encoded WebP thumbnails from an isolated Pillow child process
 
 **Status:** accepted
-**Date:** 2026-10-31 (amended after review: two-layer thumbnail validation, import screening, blob checks before `304`)
+**Date:** 2026-10-31 (amended after review: two-layer thumbnail validation, import screening, blob checks before `304`; amended again for the `thumbnail_available` listing hint)
 **Supersedes in part:** ADR-0018 (no image decoder in the worker)
 
 ## Context
@@ -73,6 +73,15 @@ decoders and metadata (GPS, camera, ICC, XMP) all arrive through it.
   `Cache-Control: private, no-cache` with a content-hash `ETag` (`304` on
   `If-None-Match` after the checks above), and `no-store` on errors. `/content` and `/snapshot` are
   unchanged.
+
+- **Listing hint (Phase 3B UI):** `ItemSummary` (listing and search) and the item
+  detail carry `thumbnail_available: bool`, an `EXISTS` over the item's `thumbnail`
+  blob row with the endpoint's row checks (`image/webp`, at most 256 KiB). It was
+  chosen over per-card processing lookups or blind requests because it costs one
+  indexed subquery per returned row and no request. It deliberately does not read the
+  object, so it cannot know about damage, tampering or trash: it is a hint, the
+  endpoint stays the authority, and clients must handle `404` and a failed load.
+  Clients never request a trashed item's thumbnail. No migration.
 
 ## Consequences
 
