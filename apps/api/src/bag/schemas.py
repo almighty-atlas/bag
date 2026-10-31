@@ -200,9 +200,15 @@ class ItemPage(BaseModel):
     next_cursor: UUID | None
 
 
+MatchedField = Literal["title", "filename", "tag", "note", "url", "content"]
+
+
 class SearchResult(ItemSummary):
     rank: float
     snippet: str
+    # Fields that contain at least one query word, in display order; empty when a result
+    # was found by exclusion only. Never a guess: each entry was checked against the query.
+    matched_fields: list[MatchedField]
 
 
 class SearchPage(BaseModel):
