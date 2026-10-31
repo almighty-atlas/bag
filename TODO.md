@@ -27,15 +27,14 @@ Shelf is a view over persisted Bag items, not a second transport/store.
       classification with extra title/text is fixed and covered by a vitest
       test that runs the real `sw.js` on a multipart POST in Node; still open:
       a real-device test and a test in an actual browser service worker.
-- [ ] **Text excerpt in recent feed:** show meaningful bounded text
-      previews when no title or note exists; preserve API auth, paging and
-      sane truncation for large Unicode input.
 - [ ] **Search upgrade:** include original filename and assigned tag names,
       title/name-aware ranking and a structured field-level match reason.
       Add migrations and DE/EN, owner-scoped and trashed-item regression
       tests. Keep existing tag/collection filters working.
 - [ ] **Immediate real-device smoke test:** Android Share→Bag; macOS browser
-      paste/save→Bag; refresh and retrieve from a second device. Cover
+      paste/save→Bag; refresh and retrieve from a second device. Check that
+      saved text shows its excerpt in the feed (API and line selection are
+      tested; the rendered card and its two-line clamp are not). Cover
       interrupted upload, auth expiry, server restart and accurate success,
       including that retrying an unanswered text/URL/file save (stable client
       retry ID, built and unit-tested) creates no duplicate.

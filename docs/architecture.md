@@ -4,7 +4,7 @@ One Python package under `apps/api/src/bag` targets Python 3.12+. FastAPI serves
 API; synchronous Psycopg connections execute parameterized SQL in short-lived
 transactions. There is no ORM or Redis. Alembic uses SQLAlchemy only to apply
 packaged SQL migrations. `apps/web` is a Preact/Vite/TypeScript app (ADR-0017)
-that talks only to the API: login, feed with cursor paging, search with snippets,
+that talks only to the API: login, feed with cursor paging and text excerpts, search with snippets,
 text/URL/file capture with the post-capture note, item detail with original
 download, editing of title, note, tags, collections and search language,
 processing state, reprocess, trash with restore, client token management, feed
@@ -222,7 +222,16 @@ configurations and matches the generated vector against their OR-combination, so
 stemming applies to items with a detected language while exact tokens match
 everywhere. Results carry `ts_rank_cd` and a plain-text `ts_headline` snippet over
 note, URL and extracted text with `«`/`»` markers; ordering is rank, then newest,
-paged by a bounded offset. Both endpoints accept `kind`, `status`, `from`/`to`
+paged by a bounded offset. Summaries of both endpoints carry `excerpt` (ADR-0021): for `kind = text` only, the
+query selects `substr(content, 1, 4096)` and `bag.excerpt.make_excerpt` reduces it to at
+most 240 characters of plain text (whitespace and line breaks collapsed, invisible and
+bidirectional control characters and common Markdown markers removed, cut on a word or
+grapheme-cluster boundary with `…` when the text continues); every other kind gets
+`null`. No migration; `content` is untouched and a multi-megabyte original never leaves
+the database. The excerpt is part of the same owner-scoped, trash-aware query as the rest of
+the summary. The web feed (`feed-text.ts`) shows title, else excerpt, else file name,
+link, note or kind as the headline, and keeps a note or excerpt that is not the headline
+below it; search results show the match snippet. Both endpoints accept `kind`, `status`, `from`/`to`
 (capture time, timezone required) and `trashed`. Queries that reduce to nothing
 return no results rather than an error. Tag and collection filters exist in both listing and search; semantic search is not implemented. The generated search vector currently excludes original filenames and tag names, has no per-field weighting, and the search API returns a snippet but not a structured matched-field reason.
 
@@ -293,8 +302,13 @@ See [TODO](../TODO.md) for actionable fixes and acceptance tests.
   each request. Retries of the same payload now reuse it (see above), verified
   by vitest tests against a fake idempotent server, not on a real network or
   device. Keys do not survive a page reload.
-- Feed summaries do not carry text excerpts and can label text captures
-  simply as "text". There is no image paste handler, contextual
+- Fixed: feed summaries used to carry no text and labelled untitled text
+  captures simply "text". They now carry a server-bounded `excerpt` (see Listing
+  and search), verified by Python unit tests of the excerpt function, PostgreSQL
+  integration tests (paging, kind filter, search, trash, owner scoping,
+  authentication, multi-megabyte originals) and vitest tests of the line selection.
+  The Preact feed component itself has no DOM test and the layout (two-line clamp)
+  was not checked in a browser. There is still no image paste handler, contextual
   copy/share/pin function, or compact mobile-first Shelf surface.
 - Original and fetched content are delivered as protected downloads or
   sandboxed snapshots; there are no decoded/re-encoded preview or thumbnail
