@@ -42,6 +42,7 @@ from bag.db import connection, ready
 from bag.download import download
 from bag.logging import configure_logging
 from bag.organize import Kind, create_named, delete_named, list_named, rename_named
+from bag.preview import thumbnail as preview_thumbnail
 from bag.ratelimit import FailureLimiter
 from bag.schemas import (
     CaptureResponse,
@@ -455,5 +456,13 @@ def create_app(
     @app.get("/api/v1/items/{item_id}/snapshot")
     def snapshot(item_id: UUID, actor: Annotated[Identity, Depends(identity)]) -> StreamingResponse:
         return download(settings, actor.owner_id, item_id, storage, "snapshot")
+
+    @app.get("/api/v1/items/{item_id}/thumbnail")
+    def thumbnail(
+        item_id: UUID,
+        actor: Annotated[Identity, Depends(identity)],
+        if_none_match: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        return preview_thumbnail(settings, actor.owner_id, item_id, storage, if_none_match)
 
     return app

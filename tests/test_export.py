@@ -172,6 +172,7 @@ def test_import_round_trip_is_idempotent_and_verifies_objects(
         "relations": 0,
         "processing_runs": 2 * len(PROCESSORS),
         "objects": 1,
+        "invalid_thumbnails": 0,
     }
     for table, expected in before.items():
         assert rows(settings, table) == expected, table

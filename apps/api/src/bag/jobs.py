@@ -17,6 +17,7 @@ logger = logging.getLogger("bag.jobs")
 
 ENRICHMENT_COLUMNS = frozenset({"mime_type", "kind", "extracted_text", "language"})
 DEFAULT_COLUMNS = frozenset({"title"})
+DERIVED_ROLES = frozenset({"snapshot", "thumbnail"})
 MAX_ERROR_LENGTH = 500
 MAX_RETRY_SECONDS = 3600.0
 
@@ -230,8 +231,8 @@ def finish(
                 (value, job.owner_id, job.item_id),
             )
         for snapshot in result.blobs:
-            if snapshot.role == "original":
-                raise ValueError("Processors may not replace originals")
+            if snapshot.role not in DERIVED_ROLES:
+                raise ValueError("Processors may only write derived blob roles")
             conn.execute(
                 "DELETE FROM blob WHERE owner_id = %s AND item_id = %s AND role = %s",
                 (job.owner_id, job.item_id, snapshot.role),

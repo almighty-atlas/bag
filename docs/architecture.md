@@ -143,7 +143,7 @@ exponential backoff from `BAG_JOB_RETRY_SECONDS`, capped at one hour, until
 Unexpected exceptions record only the exception class. Deterministic database limits
 such as the search vector size fail the run permanently instead of retrying.
 
-Six registered processors exist: `mime_detect`, `text_extract`, `language`, `url_fetch`, `image_meta` and `pdf_text`. `mime_detect` re-verifies files from stored bytes (signature
+Seven registered processors exist: `mime_detect`, `text_extract`, `language`, `url_fetch`, `image_meta`, `pdf_text` and `thumbnail`. `mime_detect` re-verifies files from stored bytes (signature
 library plus a strict UTF-8 plain-text check), sets `mime_type` and re-derives file
 kinds; text items are `text/plain` and URLs are skipped. `text_extract` copies text
 originals and decodes UTF-8 text files up to 1 MiB into `extracted_text`, noting
@@ -160,7 +160,10 @@ Outcomes may also carry `defaults` (applied only where NULL) and derived blobs
 PNG, GIF, JPEG and WebP headers into `metadata.image_meta` without decoding, and
 `pdf_text` extracts the text layer of PDF originals with pypdf up to 1 MiB and
 2000 pages (ADR-0018); `language` falls back to extracted text on reruns, so
-`bag reprocess` after a PDF or page fetch also detects its language. Because
+`bag reprocess` after a PDF or page fetch also detects its language. `thumbnail`
+decodes PNG, JPEG, WebP and GIF originals in a resource-limited child process and
+stores a re-encoded, metadata-free WebP of at most 512 px as a `thumbnail` blob
+(ADR-0023, see Thumbnails below). Because
 `search_vector` is maintained by database triggers (ADR-0022), so extraction and
 language immediately make items searchable with the right stemmer. Every capture enqueues all processors
 regardless of kind; the worker log records claim and outcome with job, item, owner
@@ -277,6 +280,31 @@ size before response, use the same verified file handle, force attachment with
 disconnect; fetched HTML is never rendered inline from the API origin. Storage errors yield
 a generic 503; neither original bytes nor filenames enter logs.
 
+### Thumbnails
+
+`GET /api/v1/items/{id}/thumbnail` is the only inline image response. It is
+authenticated (token or session), owner-scoped and returns `404` with
+`Cache-Control: no-store` for trashed, foreign, missing, damaged or tampered
+thumbnails, so a client shows its fallback. The body always comes from the
+derived `thumbnail` blob. On every request, a `304` included, the object is read
+through the integrity-checked handle (SHA-256 and size) and its WebP structure is
+validated from the headers: one still image (`VP8 `, `VP8L`, or `VP8X` with
+optional `ALPH`), consistent chunk, frame and canvas headers, 1 to 512 px per
+side, at most 256 KiB, and no EXIF, ICC, XMP or animation. A missing, damaged or
+invalid blob is `404` even when `If-None-Match` matches. Responses carry
+`image/webp`, `nosniff`, a
+`default-src 'none'; sandbox` CSP, `Cross-Origin-Resource-Policy: same-origin`,
+`Cache-Control: private, no-cache` and a content-hash `ETag` (`304` on a matching
+`If-None-Match`). The item and listing JSON are unchanged; whether a thumbnail
+exists is visible only through this endpoint and the `thumbnail` processing run
+(`skipped` runs carry `metadata.reason`). Rendering limits and the child process
+are described in ADR-0023; neither the original nor a stored thumbnail is ever
+decoded in the API process. That a thumbnail's pixels decode is established when it
+is written: the renderer decodes its own output in the child, and `bag import`
+checks every imported thumbnail in limited child processes and leaves out invalid
+ones (`invalid_thumbnails` in the counts).
+A rerun replaces the row; the previous object stays until `bag gc`.
+
 Crashes may leave unpublished `.upload-*` files or published objects without a
 database reference. They are retained until `bag gc` removes them under the
 capture locks; retry can reuse a published object in the meantime. Never manually
@@ -330,9 +358,11 @@ See [TODO](../TODO.md) for actionable fixes and acceptance tests.
   was not checked in a browser. There is still no image paste handler, contextual
   copy/share/pin function, or compact mobile-first Shelf surface.
 - Original and fetched content are delivered as protected downloads or
-  sandboxed snapshots; there are no decoded/re-encoded preview or thumbnail
-  blobs and no safe authenticated inline thumbnail endpoint. The six concept
-  mockups are design exploration, not built UI screenshots.
+  sandboxed snapshots. Images additionally get a re-encoded WebP thumbnail and
+  an authenticated inline endpoint (ADR-0023; backend only, verified by Python
+  tests). No web UI shows thumbnails yet, nothing was checked in a browser or on
+  a device, and listing responses do not announce whether a thumbnail exists.
+  The six concept mockups are design exploration, not built UI screenshots.
 - The relation table enforces owner-scoped foreign keys and directional
   uniqueness but not a symmetric, no-self related_to constraint. There is
   no relation API or UI.

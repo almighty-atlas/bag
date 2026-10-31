@@ -108,7 +108,11 @@ the title. Per input:
   `text/plain`. `text_extract` decodes such text files up to 1 MiB (truncation is
   noted in `metadata`) and skips every other format. `pdf_text` extracts the text
   layer of PDFs (unparseable files fail permanently, encrypted ones are skipped)
-  and `image_meta` records image dimensions; no OCR exists.
+  and `image_meta` records image dimensions; no OCR exists. `thumbnail` renders
+  PNG, JPEG, WebP and GIF originals into a re-encoded WebP `thumbnail` blob
+  (ADR-0023): other formats and images over the limits are `skipped` with a
+  reason in the run metadata, corrupt images fail permanently, and none of this
+  changes the saved original or the capture response.
 - URL: `mime_detect`, `text_extract` and `language` skip. `url_fetch` resolves the
   host, refuses non-public addresses, connects to the checked address, follows at
   most five re-checked redirects and reads up to `BAG_FETCH_MAX_BYTES`. The body

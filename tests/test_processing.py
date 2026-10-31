@@ -52,7 +52,8 @@ def test_capture_enqueues_transactionally_and_worker_enriches_text(
     assert item["mime_type"] == "text/plain" and item["updated_at"] > item["created_at"]
     done = runs(client, headers, saved["id"])
     for name, run in done.items():
-        expected = "skipped" if name in {"url_fetch", "image_meta", "pdf_text"} else "succeeded"
+        skipped = {"url_fetch", "image_meta", "pdf_text", "thumbnail"}
+        expected = "skipped" if name in skipped else "succeeded"
         assert run["status"] == expected and run["attempts"] == 1
         assert run["last_error"] is None and run["started_at"] and run["finished_at"]
     with connection(settings) as conn:

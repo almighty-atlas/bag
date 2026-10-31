@@ -13,7 +13,7 @@ connections use UTC. `user` is the ownership root; every other table has `owner_
 | `api_token` | Owner, name, unique SHA-256 token hash, creation/use/revocation times |
 | `session` | Owner, unique SHA-256 hash of the cookie token, creation, last-seen, expiry and revocation times |
 | `item` | Original content, source, kind, note, capture key, hash, status, timestamps, deletion marker and extraction fields |
-| `blob` | Item, role (`original` or `snapshot`), SHA-256, size, MIME and hash-derived path |
+| `blob` | Item, role (`original`, or derived `snapshot` and `thumbnail`, one row per derived role), SHA-256, size, MIME and hash-derived path |
 | `processing_run` | Unique owner/item/processor, status, attempts, error and run times |
 | `job` | Queue entry per owner/item/processor: status, attempts, limit, `run_after`, lease expiry and worker ID |
 | `tag` | Owner-scoped unique tag name |
