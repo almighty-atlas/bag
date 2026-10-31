@@ -1,4 +1,5 @@
 import codecs
+import io
 import re
 import struct
 from dataclasses import dataclass
@@ -8,6 +9,14 @@ from pypdf import PasswordType, PdfReader
 from pypdf.errors import PdfReadError
 
 from bag.fetch import UrlFetcher, clean_text
+from bag.imaging import (
+    INPUT_MIME_TYPES,
+    MAX_INPUT_BYTES,
+    MAX_OUTPUT_BYTES,
+    OUTPUT_MIME_TYPE,
+    ImageRejected,
+    render_isolated,
+)
 from bag.processing import (
     MAX_EXTRACTED_BYTES,
     SKIPPED,
@@ -18,7 +27,7 @@ from bag.processing import (
     SnapshotBlob,
     is_plain_text,
 )
-from bag.storage import BlobStorage, StorageError
+from bag.storage import BlobStorage, StorageError, UploadTooLarge
 
 SIGNATURE_BYTES = 8192
 # Re-exported for processors' callers and tests; the contract lives in bag.processing.
@@ -42,6 +51,7 @@ __all__ = [
     "pdf_text",
     "sniff_mime",
     "text_extract",
+    "thumbnail",
 ]
 
 
@@ -292,6 +302,50 @@ def image_meta(item: ProcessingItem, storage: BlobStorage) -> Outcome:
     return Outcome("succeeded", metadata={"width": width, "height": height})
 
 
+def thumbnail(item: ProcessingItem, storage: BlobStorage) -> Outcome:
+    """A bounded, re-encoded preview of a PNG, JPEG, WebP or GIF original (ADR-0023).
+
+    Unsupported formats and images over a limit are skipped with a reason; a corrupt
+    image fails permanently. The original is never changed and never served for this.
+    """
+    if item.original is None:
+        return SKIPPED
+    try:
+        with storage.open_verified(item.original) as source:
+            mime = sniff_mime(source.read(SIGNATURE_BYTES))
+            if not mime.startswith("image/"):
+                return SKIPPED
+            if mime not in INPUT_MIME_TYPES:
+                return Outcome("skipped", metadata={"reason": "unsupported_format"})
+            if item.original.size_bytes > MAX_INPUT_BYTES:
+                return Outcome("skipped", metadata={"reason": "too_large"})
+            source.seek(0)
+            data = source.read(MAX_INPUT_BYTES + 1)
+    except StorageError as exc:
+        raise ProcessorError("Original unavailable or failed its integrity check") from exc
+    try:
+        rendered = render_isolated(data)
+    except ImageRejected as exc:
+        if exc.reason == "corrupt":
+            raise ProcessorError("Image could not be decoded safely", retryable=False) from exc
+        return Outcome("skipped", metadata={"reason": exc.reason})
+    except OSError as exc:
+        raise ProcessorError("Thumbnail renderer could not start") from exc
+    try:
+        stored = storage.put(io.BytesIO(rendered), MAX_OUTPUT_BYTES)
+    except UploadTooLarge as exc:
+        raise ProcessorError("Thumbnail exceeds the size limit", retryable=False) from exc
+    except StorageError as exc:
+        raise ProcessorError("Thumbnail storage unavailable") from exc
+    dimensions = image_dimensions(rendered)
+    width, height = dimensions if dimensions is not None else (None, None)
+    return Outcome(
+        "succeeded",
+        metadata={"width": width, "height": height, "size_bytes": len(rendered)},
+        blobs=[SnapshotBlob("thumbnail", stored, OUTPUT_MIME_TYPE)],
+    )
+
+
 PROCESSORS: dict[str, Processor] = {
     "mime_detect": mime_detect,
     "text_extract": text_extract,
@@ -299,4 +353,5 @@ PROCESSORS: dict[str, Processor] = {
     "url_fetch": UrlFetcher(),
     "image_meta": image_meta,
     "pdf_text": pdf_text,
+    "thumbnail": thumbnail,
 }
