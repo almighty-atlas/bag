@@ -88,6 +88,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  if (container) render(null, container);
   container?.remove();
   unmountAll();
   setVisibility("visible");
@@ -204,6 +205,33 @@ describe("feed refresh", () => {
     await advance(REFRESH_BASE_MS);
     expect(meta(root)).not.toContain("queued");
     expect(root.textContent).not.toContain("pausiert");
+  });
+
+  it("does not restart after the final failure when the tab is hidden and shown again", async () => {
+    const bag = server([summary({ id: A, processing_status: "queued" })]);
+    const root = await mountFeed();
+    bag.fail = true;
+    await advance(120_000);
+    expect(bag.itemCalls).toHaveLength(REFRESH_MAX_FAILURES);
+
+    setVisibility("hidden");
+    await advance(0);
+    setVisibility("visible");
+    await advance(REFRESH_BASE_MS * 20);
+    expect(bag.itemCalls).toHaveLength(REFRESH_MAX_FAILURES);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(root.textContent).toContain("pausiert");
+  });
+
+  it("reaches pending items beyond the first batch while earlier ones stay queued", async () => {
+    const ids = Array.from({ length: 11 }, (_, i) => `01a0de51-0fcc-7089-ae37-1a0e481533${String(i).padStart(2, "0")}`);
+    const bag = server(ids.map((id) => summary({ id, processing_status: "queued" })));
+    const root = await mountFeed();
+    bag.set(ids[10]!, { processing_status: "ready" });
+    await advance(REFRESH_BASE_MS * 3);
+    expect(bag.itemCalls).toContain(ids[10]);
+    expect(meta(root, 10)).not.toContain("queued");
+    expect(meta(root, 0)).toContain("queued");
   });
 
   it("removes its timer and listener on unmount, even with a request in flight", async () => {

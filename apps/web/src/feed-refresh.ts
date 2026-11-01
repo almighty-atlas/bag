@@ -76,6 +76,9 @@ export function usePendingRefresh(options: RefreshOptions): { stalled: boolean; 
     let timer: ReturnType<typeof setTimeout> | undefined;
     let idle = 0;
     let failures = 0;
+    // After the final failure only an explicit retry (a new effect run) starts polling again.
+    let stopped = false;
+    let cursor = 0;
     const gone = new Set<string>();
     let goneEpoch = latest.current.epoch();
 
@@ -91,7 +94,7 @@ export function usePendingRefresh(options: RefreshOptions): { stalled: boolean; 
 
     const tick = async (): Promise<void> => {
       timer = undefined;
-      if (!alive || hidden()) return;
+      if (!alive || stopped || hidden()) return;
       if (inFlight.current) return schedule(delay());
       const { ids, fetchOne, apply, epoch } = latest.current;
       const started = epoch();
@@ -99,8 +102,12 @@ export function usePendingRefresh(options: RefreshOptions): { stalled: boolean; 
         gone.clear();
         goneEpoch = started;
       }
-      const batch = ids.filter((id) => !gone.has(id)).slice(0, REFRESH_BATCH);
-      if (batch.length === 0) return;
+      const pool = ids.filter((id) => !gone.has(id));
+      if (pool.length === 0) return;
+      // Rotate through the pool, so items behind ten long-queued ones are looked up as well.
+      const start = cursor % pool.length;
+      const batch = [...pool.slice(start), ...pool.slice(0, start)].slice(0, REFRESH_BATCH);
+      cursor = start + batch.length;
 
       inFlight.current = true;
       const results = await Promise.allSettled(batch.map(fetchOne));
@@ -119,6 +126,7 @@ export function usePendingRefresh(options: RefreshOptions): { stalled: boolean; 
       if (errors === results.length) {
         failures += 1;
         if (failures >= REFRESH_MAX_FAILURES) {
+          stopped = true;
           setStalled(true);
           return;
         }
@@ -130,6 +138,7 @@ export function usePendingRefresh(options: RefreshOptions): { stalled: boolean; 
     };
 
     const onVisibility = () => {
+      if (stopped) return;
       if (hidden()) {
         clearTimeout(timer);
         timer = undefined;
