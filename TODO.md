@@ -71,9 +71,9 @@ retrieval is done and tested; the client check is the open item above).
 - [ ] **Image preview follow-ups:**
       - Check the cards and detail on real macOS and Android browsers (only
         headless Chromium on Linux at 1280 and 390 px was used).
-      - The feed does not refresh itself: a card that says "Vorschau wird
-        erstellt…" changes after a reload or a new search (the detail view
-        polls up to 15 times).
+      - Check the feed's self-refresh (queued → ready, new thumbnails, tab
+        hidden/visible) on real macOS and Android browsers; it is covered by
+        vitest with fake timers only.
       - The phone feed scrolls horizontally by about 10 px apparently because the capture
         textarea is wider than its card (existing, unrelated to previews).
       - Fallback wording cannot say why a skipped preview is missing: the

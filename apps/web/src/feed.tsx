@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { ApiError, api, looksLikeUrl, organize, type MatchedField, type NamedEntry } from "./api";
 import { EMPTY_FILTERS, href, type Filters, type Route } from "./app";
+import { isPending, mergeDetails, usePendingRefresh } from "./feed-refresh";
 import { feedText, type FeedItem } from "./feed-text";
 import { matchReasons } from "./match-reasons";
 import { PendingShares, DISCARD_CONFIRMATION } from "./pending";
@@ -49,8 +50,13 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
   const [loading, setLoading] = useState(false);
   const [names, setNames] = useState<{ tags: NamedEntry[]; collections: NamedEntry[] }>({ tags: [], collections: [] });
   const searchInput = useRef<HTMLInputElement>(null);
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  // Counts list replacements, so a refresh answer that began before one is not applied after it.
+  const epoch = useRef(0);
 
   const load = async (append: boolean) => {
+    if (!append) epoch.current += 1;
     setLoading(true);
     setError(null);
     try {
@@ -104,6 +110,18 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
     event.preventDefault();
     go({ query: query.trim() });
   };
+
+  const { stalled, retry } = usePendingRefresh({
+    ids: rows.filter((row) => isPending(row.processing_status)).map((row) => row.id),
+    enabled: !route.trashed,
+    fetchOne: api.item,
+    epoch: () => epoch.current,
+    apply: (details) => {
+      if (mergeDetails(rowsRef.current, details) === rowsRef.current) return false;
+      setRows((old) => mergeDetails(old, details));
+      return true;
+    },
+  });
 
   const setFilter = (key: keyof Filters, value: string) => go({ filters: { ...route.filters, [key]: value } });
   const active = Object.values(route.filters).some(Boolean);
@@ -159,6 +177,14 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
         )}
       </div>
       {error && <p class="error">{error}</p>}
+      {stalled && (
+        <p class="hint">
+          Die automatische Aktualisierung ist pausiert.{" "}
+          <button type="button" class="link" onClick={retry}>
+            Jetzt aktualisieren
+          </button>
+        </p>
+      )}
       {rows.length === 0 && !loading && (
         <p class="hint">{route.trashed ? "Der Papierkorb ist leer." : "Noch nichts in der Tasche."}</p>
       )}

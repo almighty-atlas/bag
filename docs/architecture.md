@@ -323,7 +323,17 @@ card only; the detail view adds that the original is stored unchanged, still off
 "Original herunterladen" and the whole edit form, and reads the item's `thumbnail` run
 to tell "wird erstellt", "konnte nicht erstellt werden" and "keine Vorschau". While a
 detail view waits for a preview it checks again every 4 s, at most 15 times, updating
-only the preview's inputs (never the form fields). The feed does not refresh itself.
+only the preview's inputs (never the form fields).
+The feed refreshes itself (`feed-refresh.ts`): while the loaded rows include `queued` or
+`processing` items (never in the trash) it calls the existing `GET /api/v1/items/{id}`
+for up to 10 of them per round, one round at a time, first after 3 s, then at growing
+intervals up to 30 s while nothing changes. It merges only `processing_status`,
+`thumbnail_available`, `title` and `language` into the matching rows, so scroll
+position, pages, search, filters, finished thumbnails and the capture form are
+untouched. A hidden tab pauses it and a return refreshes at once; failed rounds back
+off (6 s, 12 s, ...) and after 5 in a row it stops with a "Jetzt aktualisieren" hint;
+answers that began before the list was replaced are discarded; items that answer 404
+are dropped from polling.
 Feed frames are 168 x 126 px beside the text from 560 px width and full width by 180
 px above it on phones, with `object-fit: contain`; the detail shows the picture at its
 own size, never enlarged, up to 512 px.
