@@ -2,6 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 
 import { ApiError, organize, type NamedEntry, type NamedKind } from "./api";
 import { EMPTY_FILTERS, FEED, href } from "./app";
+import { Notice } from "./notice";
 
 const LABEL: Record<NamedKind, string> = { tag: "Tags", collection: "Sammlungen" };
 
@@ -55,22 +56,24 @@ function NamedList({ kind }: { kind: NamedKind }) {
   return (
     <section>
       <h1>{LABEL[kind]}</h1>
-      {error && <p class="error">{error}</p>}
+      {error && <Notice tone="error">{error}</Notice>}
       {rows.length === 0 && <p class="hint">Noch keine {LABEL[kind]}. Sie entstehen beim Bearbeiten eines Elements.</p>}
-      <table>
-        <tbody>
+      <table class="stack" role="table">
+        <tbody role="rowgroup">
           {rows.map((row) => (
-            <tr key={row.id}>
-              <td>
+            <tr key={row.id} role="row">
+              <td role="cell">
                 <a href={href({ ...FEED, filters: { ...EMPTY_FILTERS, [kind]: row.name } })}>{row.name}</a>
               </td>
-              <td class="muted">{row.item_count} Elemente</td>
-              <td>
+              <td class="muted" role="cell">
+                {row.item_count} Elemente
+              </td>
+              <td role="cell">
                 <button type="button" class="link" onClick={() => void rename(row)}>
                   umbenennen
                 </button>
               </td>
-              <td>
+              <td role="cell">
                 <button type="button" class="link" onClick={() => void remove(row)}>
                   löschen
                 </button>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 
 import { ApiError, tokens, type ApiToken } from "./api";
+import { Notice } from "./notice";
 
 /** Client tokens for scripts and the Linux client; the secret is shown exactly once. */
 export function Tokens() {
@@ -63,20 +64,22 @@ export function Tokens() {
           </button>
         </div>
         {fresh && (
-          <p class="status" role="status">
+          <Notice tone="success">
             Neuer Token „{fresh.name}“ (jetzt sicher speichern): <code class="secret">{fresh.token}</code>
-          </p>
+          </Notice>
         )}
-        {error && <p class="error">{error}</p>}
+        {error && <Notice tone="error">{error}</Notice>}
       </form>
-      <table>
-        <tbody>
+      <table class="stack" role="table">
+        <tbody role="rowgroup">
           {rows.map((row) => (
-            <tr key={row.id} class={row.revoked_at ? "muted" : ""}>
-              <td>{row.name}</td>
-              <td>{new Date(row.created_at).toLocaleDateString()}</td>
-              <td>{row.last_used_at ? `zuletzt ${new Date(row.last_used_at).toLocaleString()}` : "nie benutzt"}</td>
-              <td>
+            <tr key={row.id} class={row.revoked_at ? "muted" : ""} role="row">
+              <td role="cell">{row.name}</td>
+              <td role="cell">{new Date(row.created_at).toLocaleDateString()}</td>
+              <td role="cell">
+                {row.last_used_at ? `zuletzt ${new Date(row.last_used_at).toLocaleString()}` : "nie benutzt"}
+              </td>
+              <td role="cell">
                 {row.revoked_at ? (
                   "widerrufen"
                 ) : (
