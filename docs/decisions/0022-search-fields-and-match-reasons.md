@@ -1,6 +1,8 @@
 # ADR-0022: Trigger-maintained weighted search vector with filenames, tags and match reasons
 
-**Status:** accepted
+**Status:** accepted; prefix and substring matching are added by
+[ADR-0025](0025-prefix-and-substring-search.md), which leaves the whole-word search below
+unchanged as its first stage
 **Date:** 2026-10-31
 
 ## Context
@@ -93,5 +95,6 @@ the parser tokenizes them (`example.org` is one token; the word `budget` in
 configurations is as loose as in ADR-0011: `-word` can still return an item whose
 other-language stem differs. The mixed German and English query configuration means a
 stem can occasionally match in the wrong language. Compound words are not decomposed
-(`Bücherregal` is not found by `Bücher`). Semantic or typo-tolerant search is not part
+(`Bücherregal` is found by `Bücher` since ADR-0025 only as a prefix in titles, filenames, tags, notes and
+URLs, not in extracted text, and `rank` is shifted by one for whole-word results). Semantic or typo-tolerant search is not part
 of this change and can merge into the same response shape later.

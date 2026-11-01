@@ -2,8 +2,9 @@
 
 Migration `0001_foundation` creates the tables below; `0002_jobs` adds `job`,
 `0003_active_job` its unique active-job index, `0004_sessions` the web login
-columns and `session` table, and `0005_search_fields` the trigger-maintained weighted
-search vector (below). All
+columns and `session` table, `0005_search_fields` the trigger-maintained weighted
+search vector and `0006_search_partial` the head vector and filename trigram index
+for prefix and substring search (both below). All
 have server-generated UUIDv7 primary keys. Timestamps use `timestamptz`; API
 connections use UTC. `user` is the ownership root; every other table has `owner_id`.
 
@@ -120,6 +121,15 @@ against the OR of the query parsed in all three configurations. Listing pages by
 descending order, relying on the `(owner_id, id)` unique index and the UUIDv7 time
 ordering; `item_recent_idx` remains for future `created_at` ordering.
 
+`item.search_head` (ADR-0025, `0006_search_partial`) is a second tsvector with the A, B
+and C lexemes of `search_vector` (title and filename, tags, note and URL) and no extracted
+text, with its own GIN index `item_search_head_idx`. The same trigger functions write it
+in the same statement as `search_vector`; it is never written by application code and is
+not exported. `item_filename_trgm_idx` is a `pg_trgm` GIN index over
+`bag_filename_key(original_filename)`, the lowercased name plus a transliterated copy
+(`ä ö ü ß` to `ae oe ue ss`). `bag_prefix_query` turns a parsed query into prefix operands
+(typed words of at least two characters; exclusions stay exact).
+
 Deletion is soft: `DELETE` sets `deleted_at` (kept on repeats), restore clears it,
 and both bump `updated_at` only when the state changes. Detail routes hide rows
 with `deleted_at` set; listings and search expose them with `trashed=true`. The
@@ -147,3 +157,16 @@ extension and no new configuration. Its downgrade restores the generated column 
 before and rewrites the table; tag and filename matching are lost again. The database
 needs a UTF-8 locale that lower-cases non-ASCII letters (the `postgres:17` image does);
 under a plain `C` locale umlaut handling in filenames and tags degrades.
+
+`0006_search_partial` creates the `pg_trgm` extension (trusted since PostgreSQL 13; the
+`postgres:17` image contains it and its default user owns the database), adds `search_head`,
+backfills it for every item and builds two GIN indexes in one transaction. It rewrites
+`item` (about 63 s for 30,000 items of 10 KB text on a slow shared core, plus the bloat of
+a full-table update: run `VACUUM ANALYZE item` afterwards), so back up, stop or idle the API and worker, run `bag migrate`, then `VACUUM ANALYZE item`
+and start the new containers (writes wait on the locks and captures fail retryably
+meanwhile). `/ready` reports `not_ready` until it ran. The previous version of the code serves
+its requests on the migrated schema but reports `not_ready` there (revision mismatch). The head adds about 3 % to the
+size of the item vectors, 3.6 MB of index and 2.3 MB of trigram index at 30,000 items, and
+about 0.35 ms to every item write and tag change. Its downgrade restores the trigger
+functions of `0005`, drops the column, both indexes and the helper functions, and leaves
+`pg_trgm` installed.

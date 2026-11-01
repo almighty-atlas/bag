@@ -7,7 +7,7 @@ from psycopg.rows import dict_row
 
 from bag.config import Settings
 
-SCHEMA_REVISION = "0005_search_fields"
+SCHEMA_REVISION = "0006_search_partial"
 Row = dict[str, Any]
 
 
