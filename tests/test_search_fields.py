@@ -282,7 +282,9 @@ def test_matched_fields_report_only_real_matches(
 
     # Several fields at once, in a fixed order.
     assert fields(client, headers, "projekt") == {item: ["title", "filename"]}
-    assert fields(client, headers, "budget") == {item: ["tag", "note"]}
+    # The URL host starts with the word: a prefix hit that follows the whole-word hit.
+    assert fields(client, headers, "budget") == {item: ["tag", "note"], link: ["url"]}
+    assert found(client, headers, "budget")[0] == item
     assert fields(client, headers, "vorlage") == {link: ["note"]}
     assert fields(client, headers, "budget.example.org") == {link: ["url"]}
     # Words that fit different fields of one item are reported per field.
@@ -300,7 +302,7 @@ def test_matched_fields_report_only_real_matches(
     assert [(row["id"], row["matched_fields"]) for row in only] == [(link, ["note"])]
     assert found(client, headers, "budget", tag="Q4") == [item]
     assert found(client, headers, "budget", tag="missing") == []
-    assert found(client, headers, "budget", status="ready") == [item]
+    assert found(client, headers, "budget", status="ready") == [item, link]
 
 
 def test_owner_isolation_trash_and_authentication(
@@ -446,7 +448,8 @@ def test_existing_items_are_backfilled_by_the_migration(
     finally:
         command.upgrade(config, "head")
 
-    assert set(found(client, headers, "archiv")) == {kept}
+    # 'archiv' is a whole word of the tag and the prefix of the legacy note 'archiviert'.
+    assert found(client, headers, "archiv") == [kept, str(legacy)]
     assert set(found(client, headers, "bericht")) == {kept}
     assert found(client, headers, "altbestand") == [str(legacy)]
     assert fields(client, headers, "altbestand") == {str(legacy): ["filename"]}
@@ -458,7 +461,7 @@ def test_existing_items_are_backfilled_by_the_migration(
     assert found(client, owner, "alter") == []
     # The triggers are live again after the upgrade.
     patch(client, headers, kept, tags=["Nachlass"])
-    assert found(client, headers, "archiv") == []
+    assert found(client, headers, "archiv") == [str(legacy)], "only the legacy note starts with it"
     assert found(client, headers, "nachlass") == [kept]
 
 
@@ -621,7 +624,10 @@ def test_unrelated_assignment_updates_do_not_reindex(
     other, a, b, c, _ = _two_owner_setup(settings, client, headers)
     sentinel = "'sentinel':1"
     with connection(settings) as conn:
-        conn.execute("UPDATE item SET search_vector = %s::tsvector", (sentinel,))
+        conn.execute(
+            "UPDATE item SET search_vector = %s::tsvector, search_head = %s::tsvector",
+            (sentinel, sentinel),
+        )
         # Provenance, confidence and timestamps are not searchable.
         conn.execute("UPDATE item_tag SET created_by = 'ai', confidence = 0.3, created_at = now()")
         # A statement that changes no row.
