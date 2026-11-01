@@ -87,9 +87,11 @@ Both API and worker expose these endpoints.
 
 ## Processing and enrichment
 
-Update existing installations. This version adds a migration for the job queue and
+Update existing installations. This version adds a migration for the job queue,
 another (`0005_search_fields`) that re-indexes every item for filename and tag search
-in one transaction, so back up first, stop or idle the API and worker, and run
+and a third (`0006_search_partial`, creates the `pg_trgm` extension, backfills a second
+small search vector and builds two indexes) for prefix and substring search, each in one
+transaction, so back up first, stop or idle the API and worker, and run
 `bag migrate` before starting the new containers; until then `/ready` reports
 `not_ready` on purpose. Tokens and data are preserved:
 
@@ -156,7 +158,11 @@ an `excerpt` (at most 240 characters of plain text, `null` for other kinds); sea
 titles, original filenames, assigned tag names, notes, URLs and extracted text. Titles and
 filenames rank above tags, tags above notes and URLs, and those above the body text; an
 exact title or filename comes first. A filename is searchable by its parts, so `rechnung`
-finds `rechnung-oktober-2026.pdf`, and tag changes apply immediately. Each result has a
+finds `rechnung-oktober-2026.pdf`, and tag changes apply immediately. The start of a word
+is enough in titles, filenames, tags, notes and URLs (`urlaub` finds the tag `Urlaubstest`, `31`
+finds `IMG_3109.webp`), and three or more characters match anywhere in a filename (`109`,
+`mg_31`, `abrech`); the text of documents matches whole words only, one character matches
+whole words only, and whole-word results always come before partial ones. Each result has a
 snippet with the matched words between `«` and `»` and `matched_fields`, the list of
 `title`, `filename`, `tag`, `note`, `url` and `content` in which a query word was found
 (empty if the result was found by exclusion only). German and English words are stemmed

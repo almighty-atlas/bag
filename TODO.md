@@ -27,18 +27,32 @@ Shelf is a view over persisted Bag items, not a second transport/store.
       classification with extra title/text is fixed and covered by a vitest
       test that runs the real `sw.js` on a multipart POST in Node; still open:
       a real-device test and a test in an actual browser service worker.
+- [x] **Prefix and substring search** ([ADR-0024](docs/decisions/0024-prefix-and-substring-search.md),
+      migration `0006_search_partial`): `urlaub` finds the tag `Urlaubstest`, `31` and `109`
+      find `IMG_3109.webp`; prefixes in title, filename, tags, note and URL, substrings of
+      three or more characters in filenames, whole words before partial hits, measured on
+      30,000 items.
 - [ ] **Search follow-ups** (filename and tag search, weighted ranking and
       `matched_fields` exist: ADR-0022, migration `0005_search_fields`):
-      - Check the "Gefunden in" line and filename/tag retrieval on real
-        devices; only API integration tests and vitest cover them.
-      - Index URL host and path words (`budget` in `budget.example.org/x-y`
-        is not searchable today) and show filename/tag hits in the snippet,
-        not only in `matched_fields`.
-      - Fold `ae/oe/ue` on the query side (`mueller` finds `Müller.pdf`, but
-        a stored `mueller.pdf` is not found by `müller`); compound words
-        (`Bücher` does not find `Bücherregal`) are not decomposed.
+      - Check the "Gefunden in" line and filename/tag retrieval, now also for partial
+        hits (type `urlaub`, `31`), on real devices; only API integration tests and vitest
+        cover them. The feed does not tell whole-word from partial results.
+      - Index URL host and path words (`example` in `budget.example.org/x-y` is not
+        searchable; the first host label is, as a prefix) and show filename/tag hits in the
+        snippet, not only in `matched_fields`.
+      - Fold `ae/oe/ue` on the query side in the substring path (`mueller` finds
+        `Müller.pdf`, but a stored `mueller.pdf` is not found by `müller`) and fold other
+        accents (`cafe` does not find `Café`); compound words are only found by their first
+        part (`Bücherregal` by `Bücher`, not `regal`), and only in titles, filenames, tags,
+        notes and URLs.
+      - Decide if titles, tags or notes need substring matching, or documents prefix
+        matching, with a measured cost; both are left out on purpose (ADR-0024).
+      - Whole-word queries of very common words rank every match: about 1.4 s for roughly
+        12,000 matches in 30,000 items of 10 KB. Limit or approximate the ranking
+        before a Bag grows that large.
       - Measure tag rename/delete on a large real Bag; if a tag spans many
-        thousand large items, move re-indexing to a background job.
+        thousand large items, move re-indexing to a background job (the head vector adds
+        about 0.35 ms per item).
 - [ ] **Immediate real-device smoke test:** Android Share→Bag; macOS browser
       paste/save→Bag; refresh and retrieve from a second device. Check that
       saved text shows its excerpt in the feed (API and line selection are

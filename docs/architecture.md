@@ -236,7 +236,23 @@ indexed in all three configurations as written, split at separators and camelCas
 and with umlauts transliterated, so `rechnung` finds `rechnung-oktober-2026.pdf`.
 Results are ordered by a tiered score (exact title or filename; query word in title
 or filename; in a tag; in note or URL), then the weighted `ts_rank`, then newest,
-paged by a bounded offset. Each result carries `rank`, a plain-text `ts_headline`
+paged by a bounded offset. This whole-word search is stage 1. Prefix and substring hits
+(ADR-0024, migration `0006_search_partial`) form stage 2, run only when stage 1 does not
+fill the page, so they always follow whole-word hits, also across pages; a bounded count
+tells where stage 2 continues when the offset lies beyond stage 1. A word of two or more
+characters, as typed (never its stem), also matches longer words that start with it in
+title, filename, tags, note and URL: a second, small vector `item.search_head` (the A to C
+lexemes of `search_vector`, maintained by the same triggers, own GIN index) answers those
+lookups, because a prefix scan of the large vector would visit and recheck every document
+with a matching word. Extracted text matches whole words only. Exclusions stay exact. A
+plain word query of at most five words is also searched as a substring of the filename
+(all words in one name; at least one of three characters, because pg_trgm cannot index
+less) through a trigram index over `bag_filename_key(original_filename)` (lowercased, plus
+an `ä ö ü ß` transliteration), with `\`, `%` and `_` escaped. Stage 2 orders prefix hits by the
+same field tiers using the head vector, then filename-substring-only hits, then newest;
+`rank` is `1 + score` for whole-word results and below 1 for partial ones, and
+`matched_fields` names the fields containing a whole word (stage 1) or a prefix and, for
+filenames, a substring (stage 2). Each result carries `rank`, a plain-text `ts_headline`
 snippet over title, note, URL and extracted text with `«`/`»` markers, and
 `matched_fields`: the subset of `title`, `filename`, `tag`, `note`, `url` and
 `content` (in that order) whose own text contains a positive query word, computed for
@@ -251,7 +267,7 @@ the summary. The web feed (`feed-text.ts`) shows title, else excerpt, else file 
 link, note or kind as the headline, and keeps a note or excerpt that is not the headline
 below it; search results show the match snippet. Both endpoints accept `kind`, `status`, `from`/`to`
 (capture time, timezone required) and `trashed`. Queries that reduce to nothing
-return no results rather than an error. Tag and collection filters exist in both listing and search; semantic search is not implemented. The snippet does not cover filenames or tags (the reasons do), URL host and path words are indexed only as the parser tokenizes them, and compound words are not decomposed. The web feed shows `matched_fields` as a muted "Gefunden in: …" line (`match-reasons.ts`).
+return no results rather than an error. Tag and collection filters exist in both listing and search; semantic search is not implemented. The snippet does not cover filenames or tags (the reasons do), URL host and path words are indexed only as the parser tokenizes them (the first label of a host is found as a prefix of the host token, `example` in `budget.example.org` is not), and compound words are not decomposed (a compound is found by its first part as a prefix in titles, filenames, tags, notes and URLs). The web feed shows `matched_fields` as a muted "Gefunden in: …" line (`match-reasons.ts`).
 
 `/health` needs no database; `/ready` requires the expected migration revision.
 FastAPI generates OpenAPI. Application logs are JSON with fixed event names and
@@ -345,7 +361,14 @@ publication, fsync failure, corruption, size limits and racing writers. Download
 disconnects are tested. Processing tests cover transactional enqueue, enrichment of
 text, files and URLs, bounded retries, backoff, lease expiry and stale results,
 concurrent workers executing every job exactly once, and permanent failure on the
-search vector limit. Search tests (`tests/test_search_fields.py`) cover filename
+search vector limit. Search tests (`tests/test_search_partial.py`) cover prefixes in tags, titles, notes and
+filenames (umlauts, transliteration, Cyrillic, CJK), substrings and their minimum lengths,
+LIKE wildcards, whole-word before prefix before substring across page boundaries and
+offsets, owner isolation, trash and every filter on partial hits, tag rename, deletion and
+direct SQL changes (the head is compared with its function for every row), exclusions,
+phrases and `OR`, PDF text with prefixes in other fields, invalid and one-character
+queries, the SQL helpers, backfill and downgrade of `0006`, and a 4,000-item bag whose
+statements must be index scans. Search tests (`tests/test_search_fields.py`) cover filename
 spellings, tags added, removed, renamed and deleted (also through direct SQL, re-pointed
 assignments and concurrent transactions, including opposite moves without deadlock), German and English terms, tier ordering with a keyword-stuffed
 body, match reasons, owner isolation, trash, filters and pagination, a backfill across a

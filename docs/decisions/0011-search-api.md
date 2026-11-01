@@ -1,7 +1,8 @@
 # ADR-0011: Search across all text configurations with plain-text snippets
 
 **Status:** accepted; the index, ranking and result fields are extended by
-[ADR-0022](0022-search-fields-and-match-reasons.md)
+[ADR-0022](0022-search-fields-and-match-reasons.md), prefix and substring matching by
+[ADR-0024](0024-prefix-and-substring-search.md)
 **Date:** 2026-09-26
 
 ## Context
