@@ -323,7 +323,9 @@ download, editing of title, note, tags, collections and search language,
 processing state, image previews (feed cards, search results and the detail view
 use only the authenticated thumbnail endpoint, with readable fallbacks), the trash with restore, client token management, filters by
 kind, tag, collection and date, and a page to rename or delete tags and
-collections. Press `/` to jump to the search box. Build and start it after
+collections ("Tags & Sammlungen"). The layout is mobile-first: a compact menu on
+phones, capture and search first, filters in a collapsible section. Press `/` to jump to
+the search box. Build and start it after
 setting a password:
 
 ```sh
