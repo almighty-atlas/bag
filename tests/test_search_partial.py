@@ -1,4 +1,4 @@
-"""Prefix and substring search: ADR-0024, migration 0006_search_partial."""
+"""Prefix and substring search: ADR-0025, migration 0006_search_partial."""
 
 import time
 from collections.abc import Iterator

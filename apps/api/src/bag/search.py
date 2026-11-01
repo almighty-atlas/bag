@@ -44,7 +44,7 @@ QUERY_SQL = (
 TYPED_SQL = "(websearch_to_tsquery('simple', %(q)s) || websearch_to_tsquery('simple', %(q_split)s))"
 # A joining separator sits between two letters or digits; a leading '-' stays an exclusion.
 _JOINERS = re.compile(r"(?<=[^\W_])[-_.](?=[^\W_])")
-# Partial matching (ADR-0024), run only when whole-word hits do not fill the page. A word of at
+# Partial matching (ADR-0025), run only when whole-word hits do not fill the page. A word of at
 # least MIN_PREFIX characters also matches longer words that start with it in title, filename,
 # tags, note and URL, never in extracted text. In a plain word query of at most
 # MAX_SUBSTRING_WORDS words, a word of at least MIN_SUBSTRING characters is also searched inside
@@ -108,7 +108,7 @@ def _matched_fields_sql(words: str, filename_extra: str = "") -> str:
     )
 
 
-# Partial matches (migration 0006; ADR-0024). prefix_q is full_q with every positive word also a
+# Partial matches (migration 0006; ADR-0025). prefix_q is full_q with every positive word also a
 # prefix of a title, filename, tag, note or URL word; head_q and guard_q state the prefixes for the
 # small search_head vector (all words, or any word); ap_q, bp_q and cp_q are single-weight forms
 # for ranking; field_q matches one field's own vector for the match reasons.

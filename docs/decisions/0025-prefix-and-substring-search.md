@@ -1,4 +1,4 @@
-# ADR-0024: Prefix and substring search with a head vector and a staged query
+# ADR-0025: Prefix and substring search with a head vector and a staged query
 
 **Status:** accepted; extends [ADR-0022](0022-search-fields-and-match-reasons.md)
 **Date:** 2026-11-01

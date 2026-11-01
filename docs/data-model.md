@@ -121,7 +121,7 @@ against the OR of the query parsed in all three configurations. Listing pages by
 descending order, relying on the `(owner_id, id)` unique index and the UUIDv7 time
 ordering; `item_recent_idx` remains for future `created_at` ordering.
 
-`item.search_head` (ADR-0024, `0006_search_partial`) is a second tsvector with the A, B
+`item.search_head` (ADR-0025, `0006_search_partial`) is a second tsvector with the A, B
 and C lexemes of `search_vector` (title and filename, tags, note and URL) and no extracted
 text, with its own GIN index `item_search_head_idx`. The same trigger functions write it
 in the same statement as `search_vector`; it is never written by application code and is

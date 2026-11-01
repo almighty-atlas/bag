@@ -237,7 +237,7 @@ and with umlauts transliterated, so `rechnung` finds `rechnung-oktober-2026.pdf`
 Results are ordered by a tiered score (exact title or filename; query word in title
 or filename; in a tag; in note or URL), then the weighted `ts_rank`, then newest,
 paged by a bounded offset. This whole-word search is stage 1. Prefix and substring hits
-(ADR-0024, migration `0006_search_partial`) form stage 2, run only when stage 1 does not
+(ADR-0025, migration `0006_search_partial`) form stage 2, run only when stage 1 does not
 fill the page, so they always follow whole-word hits, also across pages; a bounded count
 tells where stage 2 continues when the offset lies beyond stage 1. A word of two or more
 characters, as typed (never its stem), also matches longer words that start with it in

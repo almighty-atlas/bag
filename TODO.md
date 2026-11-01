@@ -27,7 +27,7 @@ Shelf is a view over persisted Bag items, not a second transport/store.
       classification with extra title/text is fixed and covered by a vitest
       test that runs the real `sw.js` on a multipart POST in Node; still open:
       a real-device test and a test in an actual browser service worker.
-- [x] **Prefix and substring search** ([ADR-0024](docs/decisions/0024-prefix-and-substring-search.md),
+- [x] **Prefix and substring search** ([ADR-0025](docs/decisions/0025-prefix-and-substring-search.md),
       migration `0006_search_partial`): `urlaub` finds the tag `Urlaubstest`, `31` and `109`
       find `IMG_3109.webp`; prefixes in title, filename, tags, note and URL, substrings of
       three or more characters in filenames, whole words before partial hits, measured on
@@ -46,7 +46,7 @@ Shelf is a view over persisted Bag items, not a second transport/store.
         part (`Bücherregal` by `Bücher`, not `regal`), and only in titles, filenames, tags,
         notes and URLs.
       - Decide if titles, tags or notes need substring matching, or documents prefix
-        matching, with a measured cost; both are left out on purpose (ADR-0024).
+        matching, with a measured cost; both are left out on purpose (ADR-0025).
       - Whole-word queries of very common words rank every match: about 1.4 s for roughly
         12,000 matches in 30,000 items of 10 KB. Limit or approximate the ranking
         before a Bag grows that large.
