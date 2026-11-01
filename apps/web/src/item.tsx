@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 
 import { ApiError, api, contentUrl, snapshotUrl, type ItemDetail, type ProcessingRun } from "./api";
+import { Notice } from "./notice";
 import { Thumbnail, previewState, thumbnailAlt } from "./thumbnail";
 
 /** A preview that is still being made is looked up again a few times, then left to a reload. */
@@ -96,7 +97,7 @@ export function ItemView({ id }: { id: string }) {
     };
   }, [imageState, id]);
 
-  if (error) return <p class="error">{error}</p>;
+  if (error) return <Notice tone="error">{error}</Notice>;
   if (!item) return <p>Lade…</p>;
 
   const save = async (event: Event) => {
@@ -224,14 +225,18 @@ export function ItemView({ id }: { id: string }) {
       )}
       <section class="card">
         <h2>Verarbeitung</h2>
-        <table>
-          <tbody>
+        <table class="stack" role="table">
+          <tbody role="rowgroup">
             {runs.map((run) => (
-              <tr key={run.processor}>
-                <td>{run.processor}</td>
-                <td class={`status-${run.status}`}>{run.status}</td>
-                <td>{run.attempts}×</td>
-                <td class="muted">{run.last_error ?? ""}</td>
+              <tr key={run.processor} role="row">
+                <td role="cell">{run.processor}</td>
+                <td class={`status-${run.status}`} role="cell">
+                  {run.status}
+                </td>
+                <td role="cell">{run.attempts}×</td>
+                <td class="muted" role="cell">
+                  {run.last_error ?? ""}
+                </td>
               </tr>
             ))}
           </tbody>

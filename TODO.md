@@ -74,8 +74,6 @@ retrieval is done and tested; the client check is the open item above).
       - Check the feed's self-refresh (queued → ready, new thumbnails, tab
         hidden/visible) on real macOS and Android browsers; it is covered by
         vitest with fake timers only.
-      - The phone feed scrolls horizontally by about 10 px apparently because the capture
-        textarea is wider than its card (existing, unrelated to previews).
       - Fallback wording cannot say why a skipped preview is missing: the
         API does not expose the `skipped` reason.
 - [ ] **Thumbnail follow-ups:** measure worker memory on the production host
@@ -84,9 +82,18 @@ retrieval is done and tested; the client check is the open item above).
 - [ ] **Fast actions:** clipboard paste for text and supported images;
       context actions to open/copy/share/download; user-friendly
       processing status instead of raw processor names.
-- [ ] **Compact phone Shelf and navigation:** recent items and search
-      first; tags/collections remain in filters or secondary organization.
-      Keep browser upload fallback where native share integration is absent.
+- [x] **Mobile-first layout, navigation and status messages**
+      ([ADR-0024](docs/decisions/0024-mobile-first-web-ui.md)): menu button on
+      phones, "Tags & Sammlungen", capture and search first, labelled collapsible
+      filters, no horizontal overflow from 320 to 1280 px (headless Chromium without mobile emulation, mocked API),
+      success/warning/error tones, compact image cards.
+- [ ] **Mobile UX on real devices:** repeat the iPhone PWA and CachyOS desktop
+      passes after ADR-0024: menu, file picker, date fields, status tones, image
+      cards, safe areas. Also open: no keyboard test in a real Safari/Firefox,
+      no screen-reader pass, and the layout check script is not part of CI.
+- [ ] **Shelf follow-ups:** tags/collections remain in filters or secondary
+      organization; keep the browser upload fallback where native share
+      integration is absent.
 - [ ] **Merkliste:** ADR for pinned_at versus a reserved collection,
       then cross-device pin/unpin and accessible list. No tasks/reminders
       or second item store.
