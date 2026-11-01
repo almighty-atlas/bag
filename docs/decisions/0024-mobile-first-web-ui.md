@@ -13,9 +13,12 @@ search matter most on a phone and must stay near the top.
 
 ## Decision
 
-- **Navigation.** Below 720 px the links sit behind one labelled "Menü" button that
+- **Navigation.** Below 900 px the links sit behind one labelled "Menü" button that
   discloses them (`aria-expanded`, `aria-controls`; closes on Escape, on a page change
-  and on a tap outside). From 720 px they are inline. All entries stay in the DOM in both
+  and on a tap outside). From 900 px they are inline: with a long user name they need
+  about 840 px, so 720 to 899 px (tablets, small windows) keep the menu. The user name
+  in "Abmelden (…)" is cut at 14 characters with an ellipsis in the inline bar; the full
+  name stays in the button text and its tooltip, and is shown in full in the menu. All entries stay in the DOM in both
   modes: Feed, Tags & Sammlungen (formerly "Tags"), Papierkorb, Token and Abmelden. The
   current page carries `aria-current`.
 - **Status messages.** One `Notice` component with three tones. Success is only a save the
@@ -23,9 +26,14 @@ search matter most on a phone and must stay near the top.
   files and a share that is no longer open are warnings. A refused save, lost share files
   and load errors are errors. Tones differ in color, glyph (✓ ⚠ ✕) and a spoken label;
   errors use `role="alert"`, the rest `role="status"`. Retry and discard stay unchanged.
+  A server failure (HTTP 5xx) or timeout (408) can happen after the item was stored, so it
+  is a warning "Speichern nicht bestätigt (HTTP …)", not an error; a retry reuses the same
+  capture ID. Clear refusals (for example 400, 413, 422) stay errors "Nicht gespeichert: …".
 - **Capture and search.** Order on phones: capture (text, thought, then "Dateien
   hochladen" and "In die Tasche"), search, then a collapsed "Filter" section. Filters are
-  open on wide screens and whenever one is set, and show the number of active filters.
+  open on wide screens (720 px) and whenever one is set, also when it is set later (tag
+  link, other route); collapsing by hand stays possible until the filters change again.
+  The section shows the number of active filters.
   Every filter has a visible label; the two dates read "Erfasst von" and "Erfasst bis"
   (the filter applies to the capture time). The native file input is visually hidden but
   focusable; its label is the visible, touch-sized button. A picked file still uploads at
@@ -42,5 +50,7 @@ search matter most on a phone and must stay near the top.
 ## Consequences
 
 No API, storage or schema change. The layout is verified in headless Chromium against a
-mocked API at 320, 375, 390, 430 and 1280 px and by component tests for the semantics; it
-has not yet been checked on real devices.
+mocked API from 320 to 1280 px (including 720, 768 and 900 px with user names up to 63
+characters) and by component tests for the semantics; it has not yet been checked on real
+devices. The browser check must not use Chromium's mobile emulation (`isMobile`), which
+widens the viewport to fit overflowing content and hides the overflow.

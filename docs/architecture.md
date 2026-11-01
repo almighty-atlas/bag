@@ -328,13 +328,13 @@ Feed frames sit beside the text on every width, 96 px square on phones and
 168 x 126 px from 560 px, with `object-fit: contain`; the detail shows the picture at its
 own size, never enlarged, up to 512 px.
 
-The UI is mobile-first (ADR-0024). Below 720 px the navigation is a "Menü" disclosure
-button; from 720 px it is inline. The entry formerly named "Tags" is "Tags & Sammlungen".
+The UI is mobile-first (ADR-0024). Below 900 px the navigation is a "Menü" disclosure
+button; from 900 px it is inline, with a long user name cut by an ellipsis. The entry formerly named "Tags" is "Tags & Sammlungen".
 Status messages (`notice.tsx`) are success (server-confirmed saves only), warning
-(unanswered or unconfirmed saves, unconfirmed files, a share no longer open) or error
-(refused saves, lost share files, load failures), distinguished by color, glyph and a
+(unanswered saves and HTTP 5xx or 408 answers, unconfirmed files, a share no longer
+open) or error (clearly refused saves such as 400 or 413, lost share files, load failures), distinguished by color, glyph and a
 spoken label; errors use `role="alert"`. The filters sit in a "Filter" disclosure that
-is open on wide screens or whenever a filter is active, with visible labels (the dates
+is open on wide screens or whenever a filter is active (also when one is set later), with visible labels (the dates
 are "Erfasst von" / "Erfasst bis"). The native file input is visually hidden but
 focusable, and its label is the touch-sized "Dateien hochladen" button; picking files
 still uploads at once.

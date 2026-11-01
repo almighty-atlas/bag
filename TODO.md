@@ -85,7 +85,7 @@ retrieval is done and tested; the client check is the open item above).
 - [x] **Mobile-first layout, navigation and status messages**
       ([ADR-0024](docs/decisions/0024-mobile-first-web-ui.md)): menu button on
       phones, "Tags & Sammlungen", capture and search first, labelled collapsible
-      filters, no horizontal overflow at 320–430 px (headless Chromium, mocked API),
+      filters, no horizontal overflow from 320 to 1280 px (headless Chromium without mobile emulation, mocked API),
       success/warning/error tones, compact image cards.
 - [ ] **Mobile UX on real devices:** repeat the iPhone PWA and CachyOS desktop
       passes after ADR-0024: menu, file picker, date fields, status tones, image
