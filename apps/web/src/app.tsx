@@ -4,6 +4,7 @@ import { ApiError, api, type Session } from "./api";
 import { Feed } from "./feed";
 import { ItemView } from "./item";
 import { Login } from "./login";
+import { Nav } from "./nav";
 import { Organize } from "./organize";
 import { SHARE_FIELDS, shareDraft, sharePayload, type SharePayload } from "./share";
 import { batchDraft, loadBatch, type ShareBatch } from "./share-store";
@@ -132,15 +133,7 @@ export function App() {
         <a href="#/" class="brand">
           <span aria-hidden="true">👝</span> Bag of Holding
         </a>
-        <nav>
-          <a href={href(FEED)}>Feed</a>
-          <a href={href({ name: "organize" })}>Tags</a>
-          <a href={href({ ...FEED, trashed: true })}>Papierkorb</a>
-          <a href={href({ name: "tokens" })}>Token</a>
-          <button type="button" class="link" onClick={signOut}>
-            Abmelden ({session.username ?? session.display_name})
-          </button>
-        </nav>
+        <Nav route={route} user={session.username ?? session.display_name} onSignOut={signOut} />
       </header>
       <main>
         {route.name === "item" && <ItemView id={route.id} />}

@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 
 import { ApiError, api, type Session } from "./api";
+import { Notice } from "./notice";
 
 export function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   const [username, setUsername] = useState("");
@@ -50,7 +51,7 @@ export function Login({ onLogin }: { onLogin: (session: Session) => void }) {
             required
           />
         </label>
-        {error && <p class="error">{error}</p>}
+        {error && <Notice tone="error">{error}</Notice>}
         <button type="submit" disabled={busy}>
           Anmelden
         </button>

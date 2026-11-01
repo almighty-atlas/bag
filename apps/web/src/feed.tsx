@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { ApiError, api, looksLikeUrl, organize, type MatchedField, type NamedEntry } from "./api";
 import { EMPTY_FILTERS, href, type Filters, type Route } from "./app";
+import { isPending, mergeDetails, usePendingRefresh } from "./feed-refresh";
 import { feedText, type FeedItem } from "./feed-text";
 import { matchReasons } from "./match-reasons";
+import { Notice, type NoticeState } from "./notice";
 import { PendingShares, DISCARD_CONFIRMATION } from "./pending";
 import { CaptureKeys, uploadFiles, type PendingFile } from "./retry";
 import type { ShareDraft } from "./share";
@@ -35,6 +37,19 @@ export function filterParams(filters: Filters): Record<string, string> {
   return params;
 }
 
+/**
+ * A server failure or timeout can happen after the item was stored, so the save is unconfirmed
+ * and a retry (same capture ID) is the answer. Other statuses are clear refusals.
+ */
+export function outcomeUnknown(status: number): boolean {
+  return status >= 500 || status === 408;
+}
+
+/** Same breakpoint as the stylesheet's wide layout. */
+function wideScreen(): boolean {
+  return typeof matchMedia === "function" && matchMedia("(min-width: 720px)").matches;
+}
+
 /** What the capture form starts with: a pending share (stored batch) or only prefilled fields. */
 export interface ShareInput {
   batch: ShareBatch | null;
@@ -49,8 +64,13 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
   const [loading, setLoading] = useState(false);
   const [names, setNames] = useState<{ tags: NamedEntry[]; collections: NamedEntry[] }>({ tags: [], collections: [] });
   const searchInput = useRef<HTMLInputElement>(null);
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  // Counts list replacements, so a refresh answer that began before one is not applied after it.
+  const epoch = useRef(0);
 
   const load = async (append: boolean) => {
+    if (!append) epoch.current += 1;
     setLoading(true);
     setError(null);
     try {
@@ -105,8 +125,28 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
     go({ query: query.trim() });
   };
 
+  const { stalled, retry } = usePendingRefresh({
+    ids: rows.filter((row) => isPending(row.processing_status)).map((row) => row.id),
+    enabled: !route.trashed,
+    fetchOne: api.item,
+    epoch: () => epoch.current,
+    apply: (details) => {
+      if (mergeDetails(rowsRef.current, details) === rowsRef.current) return false;
+      setRows((old) => mergeDetails(old, details));
+      return true;
+    },
+  });
+
   const setFilter = (key: keyof Filters, value: string) => go({ filters: { ...route.filters, [key]: value } });
-  const active = Object.values(route.filters).some(Boolean);
+  const activeCount = Object.values(route.filters).filter(Boolean).length;
+  const [filtersOpen, setFiltersOpen] = useState(() => activeCount > 0 || wideScreen());
+  // A filter set from elsewhere (tag link, other route) opens the section; collapsing it by hand
+  // stays possible until the filters change again.
+  const filtersKey = JSON.stringify(route.filters);
+  useEffect(() => {
+    if (activeCount > 0) setFiltersOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtersKey]);
 
   return (
     <>
@@ -116,49 +156,80 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
         <input
           ref={searchInput}
           type="search"
-          placeholder={route.trashed ? "Im Papierkorb suchen…" : "Suchen… (Tasche OR \"local RAG\")"}
+          aria-label="Suchen"
+          placeholder={route.trashed ? "Im Papierkorb suchen…" : "Suchen…"}
           value={query}
           onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
         />
         <button type="submit">Suchen</button>
       </form>
-      <div class="filters">
-        <select value={route.filters.kind} onChange={(e) => setFilter("kind", (e.target as HTMLSelectElement).value)}>
-          <option value="">alle Arten</option>
-          {["text", "url", "image", "document", "file"].map((kind) => (
-            <option value={kind} key={kind}>
-              {KIND_ICON[kind]} {kind}
-            </option>
-          ))}
-        </select>
-        <select value={route.filters.tag} onChange={(e) => setFilter("tag", (e.target as HTMLSelectElement).value)}>
-          <option value="">alle Tags</option>
-          {names.tags.map((tag) => (
-            <option value={tag.name} key={tag.id}>
-              {tag.name} ({tag.item_count})
-            </option>
-          ))}
-        </select>
-        <select
-          value={route.filters.collection}
-          onChange={(e) => setFilter("collection", (e.target as HTMLSelectElement).value)}
-        >
-          <option value="">alle Sammlungen</option>
-          {names.collections.map((collection) => (
-            <option value={collection.name} key={collection.id}>
-              {collection.name} ({collection.item_count})
-            </option>
-          ))}
-        </select>
-        <input type="date" value={route.filters.from} onChange={(e) => setFilter("from", (e.target as HTMLInputElement).value)} aria-label="ab" />
-        <input type="date" value={route.filters.to} onChange={(e) => setFilter("to", (e.target as HTMLInputElement).value)} aria-label="bis" />
-        {active && (
-          <button type="button" class="link" onClick={() => go({ filters: EMPTY_FILTERS })}>
-            Filter löschen
+      {/* Open on wide screens and whenever a filter is set; a phone keeps capture and search above the fold. */}
+      <details class="filters" open={filtersOpen} onToggle={(e) => setFiltersOpen((e.currentTarget as HTMLDetailsElement).open)}>
+        <summary>
+          Filter{activeCount > 0 && <span class="badge">{activeCount} aktiv</span>}
+        </summary>
+        <div class="filter-grid">
+          <label>
+            Art
+            <select value={route.filters.kind} onChange={(e) => setFilter("kind", (e.target as HTMLSelectElement).value)}>
+              <option value="">alle Arten</option>
+              {["text", "url", "image", "document", "file"].map((kind) => (
+                <option value={kind} key={kind}>
+                  {KIND_ICON[kind]} {kind}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Tag
+            <select value={route.filters.tag} onChange={(e) => setFilter("tag", (e.target as HTMLSelectElement).value)}>
+              <option value="">alle Tags</option>
+              {names.tags.map((tag) => (
+                <option value={tag.name} key={tag.id}>
+                  {tag.name} ({tag.item_count})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Sammlung
+            <select
+              value={route.filters.collection}
+              onChange={(e) => setFilter("collection", (e.target as HTMLSelectElement).value)}
+            >
+              <option value="">alle Sammlungen</option>
+              {names.collections.map((collection) => (
+                <option value={collection.name} key={collection.id}>
+                  {collection.name} ({collection.item_count})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Erfasst von
+            <input type="date" value={route.filters.from} onChange={(e) => setFilter("from", (e.target as HTMLInputElement).value)} />
+          </label>
+          <label>
+            Erfasst bis
+            <input type="date" value={route.filters.to} onChange={(e) => setFilter("to", (e.target as HTMLInputElement).value)} />
+          </label>
+          {activeCount > 0 && (
+            <button type="button" class="link clear" onClick={() => go({ filters: EMPTY_FILTERS })}>
+              Filter löschen
+            </button>
+          )}
+          <p class="hint search-tip">Suchtipp: <code>Tasche OR "local RAG"</code> findet beide Begriffe; Anführungszeichen suchen eine Wortfolge.</p>
+        </div>
+      </details>
+      {error && <Notice tone="error">{error}</Notice>}
+      {stalled && (
+        <p class="hint">
+          Die automatische Aktualisierung ist pausiert.{" "}
+          <button type="button" class="link" onClick={retry}>
+            Jetzt aktualisieren
           </button>
-        )}
-      </div>
-      {error && <p class="error">{error}</p>}
+        </p>
+      )}
       {rows.length === 0 && !loading && (
         <p class="hint">{route.trashed ? "Der Papierkorb ist leer." : "Noch nichts in der Tasche."}</p>
       )}
@@ -234,34 +305,47 @@ function Capture({ onSaved, share }: { onSaved: () => void; share: ShareInput | 
   const [note, setNote] = useState(share?.draft.note ?? "");
   // Shared titles and texts may span lines, which a single-line input would drop.
   const [multilineNote] = useState(() => Boolean(share?.draft.note.includes("\n")));
-  const [status, setStatus] = useState<string | null>(null);
+  const [status, setStatus] = useState<NoticeState | null>(null);
   const [busy, setBusy] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [keys] = useState(() => new CaptureKeys());
   const fileInput = useRef<HTMLInputElement>(null);
 
   const finish = (duplicate: string | null) => {
-    setStatus(duplicate ? "✓ Gespeichert – war schon in der Tasche" : "✓ Gespeichert");
+    setStatus({ tone: "success", text: duplicate ? "Gespeichert – war schon in der Tasche" : "Gespeichert" });
     setText("");
     setNote("");
     onSaved();
   };
 
+  // Only a server-confirmed save is a success; an unanswered request is a warning, a refusal an error.
   const fail = (failure: unknown, saved = 0) => {
     if (failure instanceof BatchGoneError) {
-      setStatus("Dieser geteilte Inhalt ist nicht mehr offen: bereits gespeichert oder verworfen.");
+      setStatus({
+        tone: "warning",
+        text: "Dieser geteilte Inhalt ist nicht mehr offen: bereits gespeichert oder verworfen.",
+      });
       return;
     }
     if (failure instanceof MissingFilesError) {
-      setStatus(
-        `${failure.names.join(", ")}: nicht mehr auf diesem Gerät vorhanden und nie gespeichert. Bitte erneut teilen; der geteilte Inhalt bleibt bis zum Verwerfen offen.`,
-      );
+      setStatus({
+        tone: "error",
+        text: `${failure.names.join(", ")}: nicht mehr auf diesem Gerät vorhanden und nie gespeichert. Bitte erneut teilen; der geteilte Inhalt bleibt bis zum Verwerfen offen.`,
+      });
       return;
     }
-    const reason = failure instanceof ApiError ? `Fehler: ${failure.message}` : "Speichern nicht bestätigt.";
-    setStatus(
-      `${saved ? `${saved} Datei(en) gespeichert. ` : ""}${reason} Unverändert erneut speichern legt kein Duplikat an; geänderte Eingaben werden als neue Erfassung gespeichert.`,
-    );
+    const refused = failure instanceof ApiError && !outcomeUnknown(failure.status);
+    // The notice itself already says "Fehler" or "Warnung"; the text only names the cause.
+    const reason =
+      failure instanceof ApiError && refused
+        ? `Nicht gespeichert: ${failure.message.replace(/[.\s]+$/, "")}.`
+        : failure instanceof ApiError
+          ? `Speichern nicht bestätigt (HTTP ${failure.status}).`
+          : "Speichern nicht bestätigt.";
+    setStatus({
+      tone: refused ? "error" : "warning",
+      text: `${saved ? `${saved} Datei(en) gespeichert. ` : ""}${reason} Unverändert erneut speichern legt kein Duplikat an; geänderte Eingaben werden als neue Erfassung gespeichert.`,
+    });
   };
 
   const save = async (event: Event) => {
@@ -337,33 +421,40 @@ function Capture({ onSaved, share }: { onSaved: () => void; share: ShareInput | 
       }}
     >
       <textarea
+        aria-label="Text, Link oder Gedanken"
         placeholder="Text, Link oder Gedanken hier ablegen… (Dateien per Drag & Drop)"
         value={text}
         rows={3}
         onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
       />
-      <div class="row">
-        {multilineNote ? (
-          <textarea
-            placeholder="Ein Gedanke dazu (optional)"
-            value={note}
-            rows={3}
-            onInput={(e) => setNote((e.target as HTMLTextAreaElement).value)}
-          />
-        ) : (
-          <input
-            placeholder="Ein Gedanke dazu (optional)"
-            value={note}
-            onInput={(e) => setNote((e.target as HTMLInputElement).value)}
-          />
-        )}
-        <input
-          ref={fileInput}
-          type="file"
-          multiple
-          onChange={(e) => void upload((e.target as HTMLInputElement).files)}
-          aria-label="Dateien hochladen"
+      {multilineNote ? (
+        <textarea
+          aria-label="Ein Gedanke dazu (optional)"
+          placeholder="Ein Gedanke dazu (optional)"
+          value={note}
+          rows={3}
+          onInput={(e) => setNote((e.target as HTMLTextAreaElement).value)}
         />
+      ) : (
+        <input
+          aria-label="Ein Gedanke dazu (optional)"
+          placeholder="Ein Gedanke dazu (optional)"
+          value={note}
+          onInput={(e) => setNote((e.target as HTMLInputElement).value)}
+        />
+      )}
+      <div class="row actions">
+        {/* The native control is hidden but stays focusable; the label is the visible, touch-sized button. */}
+        <label class="button file-button">
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            class="sr-only"
+            onChange={(e) => void upload((e.target as HTMLInputElement).files)}
+          />
+          <span aria-hidden="true">📎</span> Dateien hochladen
+        </label>
         <button type="submit" disabled={busy || (!text.trim() && !pendingShare)}>
           In die Tasche
         </button>
@@ -379,17 +470,19 @@ function Capture({ onSaved, share }: { onSaved: () => void; share: ShareInput | 
         </p>
       )}
       {pendingFiles.length > 0 && (
-        <p class="hint">
+        <Notice tone="warning">
           {pendingFiles.length} Datei(en) nicht bestätigt: {pendingFiles.map(({ file }) => file.name).join(", ")}.{" "}
-          <button type="button" disabled={busy} onClick={() => void sendFiles(pendingFiles)}>
-            Erneut versuchen
-          </button>{" "}
-          <button type="button" class="link" disabled={busy} onClick={() => setPendingFiles([])}>
-            Verwerfen
-          </button>
-        </p>
+          <span class="notice-actions">
+            <button type="button" disabled={busy} onClick={() => void sendFiles(pendingFiles)}>
+              Erneut versuchen
+            </button>
+            <button type="button" class="link" disabled={busy} onClick={() => setPendingFiles([])}>
+              Verwerfen
+            </button>
+          </span>
+        </Notice>
       )}
-      {status && <p class="status" role="status">{status}</p>}
+      {status && <Notice tone={status.tone}>{status.text}</Notice>}
     </form>
   );
 }

@@ -400,13 +400,18 @@ describe("responsive layout", () => {
     return match?.[1] ?? "";
   };
 
-  it("scales feed pictures uniformly inside a frame, stacked on phones and side by side from 560 px", () => {
+  it("scales feed pictures uniformly inside a fixed frame beside the text: 96 px square on phones, 168×126 from 560 px", () => {
     expect(rule(".thumb.card img")).toMatch(/object-fit:\s*contain/);
-    expect(rule(".thumb.card")).toMatch(/width:\s*100%/);
-    expect(rule(".item.with-thumb")).toMatch(/flex-direction:\s*column/);
-    const wide = /@media \(min-width: 560px\) \{([\s\S]*?)\n\}/.exec(styles)?.[1] ?? "";
-    expect(wide).toMatch(/\.item\.with-thumb\s*\{\s*flex-direction:\s*row/);
-    expect(wide).toMatch(/\.thumb\.card\s*\{[^}]*flex:\s*0 0 168px/);
+    const phone = rule(".thumb.card");
+    expect(phone).toMatch(/flex:\s*0 0 96px/);
+    expect(phone).toMatch(/width:\s*96px/);
+    expect(phone).toMatch(/height:\s*96px/);
+    // The frame must not inherit the .card container's margin and padding (it shares the class name).
+    expect(phone).toMatch(/margin:\s*0/);
+    expect(phone).toMatch(/padding:\s*0/);
+    expect(styles).not.toMatch(/\.item\.with-thumb\s*\{[^}]*flex-direction:\s*column/);
+    const wide = /@media \(min-width: 560px\) \{([\s\S]*?)\n\}/.exec(styles.slice(styles.indexOf("Image previews")))?.[1] ?? "";
+    expect(wide).toMatch(/\.thumb\.card\s*\{[^}]*flex-basis:\s*168px[^}]*width:\s*168px[^}]*height:\s*126px/);
   });
 
   it("shows the detail picture at its own size, capped at the 512 px thumbnail limit", () => {
