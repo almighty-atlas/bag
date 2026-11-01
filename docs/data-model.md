@@ -162,8 +162,10 @@ under a plain `C` locale umlaut handling in filenames and tags degrades.
 `postgres:17` image contains it and its default user owns the database), adds `search_head`,
 backfills it for every item and builds two GIN indexes in one transaction. It rewrites
 `item` (about 63 s for 30,000 items of 10 KB text on a slow shared core, plus the bloat of
-a full-table update: run `VACUUM ANALYZE item` afterwards), so back up and run it with API
-and worker idle; `/ready` reports `not_ready` until it ran. The head adds about 3 % to the
+a full-table update: run `VACUUM ANALYZE item` afterwards), so back up, stop or idle the API and worker, run `bag migrate`, then `VACUUM ANALYZE item`
+and start the new containers (writes wait on the locks and captures fail retryably
+meanwhile). `/ready` reports `not_ready` until it ran. The previous version of the code serves
+its requests on the migrated schema but reports `not_ready` there (revision mismatch). The head adds about 3 % to the
 size of the item vectors, 3.6 MB of index and 2.3 MB of trigram index at 30,000 items, and
 about 0.35 ms to every item write and tag change. Its downgrade restores the trigger
 functions of `0005`, drops the column, both indexes and the helper functions, and leaves

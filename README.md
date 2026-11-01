@@ -91,13 +91,15 @@ Update existing installations. This version adds a migration for the job queue,
 another (`0005_search_fields`) that re-indexes every item for filename and tag search
 and a third (`0006_search_partial`, creates the `pg_trgm` extension, backfills a second
 small search vector and builds two indexes) for prefix and substring search, each in one
-transaction, so back up first, stop or idle the API and worker, and run
+transaction (`0006` also needs `VACUUM ANALYZE item` afterwards), so back up first, stop or idle the API and worker, and run
 `bag migrate` before starting the new containers; until then `/ready` reports
 `not_ready` on purpose. Tokens and data are preserved:
 
 ```sh
 docker compose --env-file .env -f deploy/compose/compose.yaml build
 docker compose --env-file .env -f deploy/compose/compose.yaml run --rm bag-api bag migrate
+docker compose --env-file .env -f deploy/compose/compose.yaml exec -T postgres \
+  sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "VACUUM ANALYZE item"'
 docker compose --env-file .env -f deploy/compose/compose.yaml up -d bag-api bag-worker
 ```
 

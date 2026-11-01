@@ -248,7 +248,8 @@ with a matching word. Extracted text matches whole words only. Exclusions stay e
 plain word query of at most five words is also searched as a substring of the filename
 (all words in one name; at least one of three characters, because pg_trgm cannot index
 less) through a trigram index over `bag_filename_key(original_filename)` (lowercased, plus
-an `ä ö ü ß` transliteration), with `\`, `%` and `_` escaped. Stage 2 orders prefix hits by the
+an `ä ö ü ß` transliteration), with `\`, `%` and `_` escaped. The two statements do not share a snapshot, partial hits are out of reach behind more than about
+1,000 whole-word hits (the `offset` cap), and substrings need a plain word query. Stage 2 orders prefix hits by the
 same field tiers using the head vector, then filename-substring-only hits, then newest;
 `rank` is `1 + score` for whole-word results and below 1 for partial ones, and
 `matched_fields` names the fields containing a whole word (stage 1) or a prefix and, for

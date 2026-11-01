@@ -85,8 +85,8 @@ whole-word results and below 1 for partial ones, so it never increases along a r
 **Match reasons and snippet.** `matched_fields` keeps its meaning: a field is listed if its own
 text contains a query word, here as a whole word for stage 1 results and as a prefix, or for
 `filename` a substring, for stage 2 results; `content` always means a whole word of the text.
-Snippets highlight prefix hits in note, URL and text; filenames and tags are still not part
-of the snippet (reasons only).
+A prefix hit in the note is highlighted in the snippet; the extracted text is highlighted
+for whole words, and filenames and tags are still not part of the snippet (reasons only).
 
 ## Consequences
 
@@ -103,14 +103,34 @@ tracked in TODO.md.
 The head vector and the two indexes add 6 MB, 3.6 MB and 2.3 MB at 30,000 items (the large vector and its
 index: 213 MB and 36 MB). Computing the head costs about 0.35 ms per item write, against about
 2.8 ms for the large vector at 10 KB of text. The migration took 63 s here (backfill and both
-index builds, in one transaction that rewrites `item`); run it like `0005` with API and worker idle, then `VACUUM
-ANALYZE item`. It needs `pg_trgm` (a trusted extension; the `postgres:17` image ships it and its superuser
+index builds, in one transaction). The backfill updates every row and the index builds
+lock `item` against writes meanwhile, so captures in that time wait and, after the API's 10 s
+statement timeout, fail with the retryable 503 (no capture is lost or acknowledged falsely;
+clients retry with the same capture ID). Procedure: back up, stop or idle the API and worker,
+run `bag migrate`, run `VACUUM ANALYZE item` (the backfill leaves dead row versions, and
+the planner needs fresh statistics for the new indexes), start the new containers.
+The order matters in one direction: the new API against the old schema is not ready
+(`/ready` reports it), and if it ran anyway, every search that does not fill its page from
+whole-word hits would fail with 503. The old API against the migrated schema serves its requests unchanged (the triggers maintain the
+new column, which old code ignores) but `/ready` reports `not_ready` because the revision differs, so a
+rollback of the code without a downgrade of the schema works functionally; restart policies
+that act on readiness will not like it. It needs `pg_trgm` (a trusted extension; the `postgres:17` image ships it and its superuser
 owns the database; elsewhere the migration user needs the `CREATE` privilege on the database). The downgrade restores
 the functions of 0005, drops the column, indexes and new functions and leaves the extension installed.
 Case folding in substrings and prefixes follows the database locale (a UTF-8 locale that lower-cases
 non-ASCII letters, as before).
 
-Limits: no substring inside titles, tags, notes, URLs or extracted text; below three characters
+Limits of the staged search: stage 2 is only reached after the whole-word hits, so with more
+than about 1,000 whole-word hits (the API caps `offset` at 1000) partial hits cannot be paged to.
+The two statements of a request do not share a snapshot: a capture or tag change between them
+can show one item twice or not at all on that request. Each statement has the API's 10 s
+statement timeout. A query with one plain word never combines its parts across the head
+vector and the extracted text (a hyphenated word such as `kaffee-sor` needs both parts in the
+head); several words, and queries with operators, can. Only filenames are searched
+for substrings, and only by plain word queries of at most five words; phrases, `OR` and
+exclusions get prefix matching only.
+
+Further limits: no substring inside titles, tags, notes, URLs or extracted text; below three characters
 only the start of a word matches in filenames, tags, titles, notes and URLs (`09` does not find
 `IMG_3109.webp`); one-character words match whole words only; the host `budget.example.org` is
 found by `budget` (a prefix of the whole host token) but not by `example`; accents other than `ä ö ü ß` are not folded
