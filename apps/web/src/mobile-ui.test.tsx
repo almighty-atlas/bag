@@ -112,7 +112,12 @@ describe("filters", () => {
   const stubList = () =>
     vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
       const path = new URL(String(input), "https://bag.test").pathname;
-      const body = path === "/api/v1/items" ? { items: [], next_cursor: null } : [];
+      const body =
+        path === "/api/v1/items"
+          ? { items: [], next_cursor: null }
+          : path === "/api/v1/search"
+            ? { results: [], next_offset: null }
+            : [];
       return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
     });
 
@@ -142,6 +147,58 @@ describe("filters", () => {
     expect(root.querySelector("summary .badge")?.textContent).toBe("2 aktiv");
     expect(root.querySelector(".filter-grid .clear")?.textContent).toBe("Filter löschen");
   });
+
+  describe("when filters arrive after the first render", () => {
+    const isOpen = (root: HTMLElement) => root.querySelector("details.filters")?.hasAttribute("open");
+    const collapse = async (root: HTMLElement) => {
+      const details = root.querySelector<HTMLDetailsElement>("details.filters")!;
+      await act(() => {
+        details.open = false;
+        details.dispatchEvent(new Event("toggle"));
+      });
+    };
+    const show = (route: typeof FEED) => act(() => render(<Feed route={route} share={null} />, container));
+    let container: HTMLElement;
+
+    beforeEach(() => {
+      stubList();
+      // A phone: no wide-screen match, so the section starts collapsed.
+      vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    });
+
+    it("opens the section when a tag link or another route sets a filter", async () => {
+      container = await mount(<Feed route={FEED} share={null} />);
+      expect(isOpen(container)).toBe(false);
+      await show({ ...FEED, filters: { ...EMPTY_FILTERS, tag: "wohnung" } });
+      await settle();
+      expect(isOpen(container)).toBe(true);
+      expect(container.querySelector("summary .badge")?.textContent).toBe("1 aktiv");
+    });
+
+    it("can still be collapsed by hand, and stays so until the filters change again", async () => {
+      const tagged = { ...FEED, filters: { ...EMPTY_FILTERS, tag: "wohnung" } };
+      container = await mount(<Feed route={tagged} share={null} />);
+      expect(isOpen(container)).toBe(true);
+
+      await collapse(container);
+      expect(isOpen(container)).toBe(false);
+
+      // Same filters, other search text: no reason to reopen.
+      await show({ ...tagged, query: "budget" });
+      await settle();
+      expect(isOpen(container)).toBe(false);
+
+      // Clearing filters never forces anything.
+      await show(FEED);
+      await settle();
+      expect(isOpen(container)).toBe(false);
+
+      // A different filter set opens it again.
+      await show({ ...FEED, filters: { ...EMPTY_FILTERS, kind: "image" } });
+      await settle();
+      expect(isOpen(container)).toBe(true);
+    });
+  });
 });
 
 describe("capture feedback", () => {
@@ -149,12 +206,13 @@ describe("capture feedback", () => {
     new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
   /** The capture endpoints answer with `capture()`; the feed lists are empty. */
-  const stubCapture = (capture: () => Response | Promise<Response>) => {
+  const stubCapture = (capture: () => Response | Promise<Response>, bodies: unknown[] = []) => {
     const calls: string[] = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input), "https://bag.test").pathname;
       if (path.startsWith("/api/v1/capture")) {
         calls.push(`${init?.method ?? "GET"} ${path}`);
+        if (typeof init?.body === "string") bodies.push(JSON.parse(init.body));
         return capture();
       }
       return json(path === "/api/v1/items" ? { items: [], next_cursor: null } : []);
@@ -206,6 +264,63 @@ describe("capture feedback", () => {
     expect(text).toContain("kein Duplikat");
   });
 
+  it.each([500, 502, 503, 504, 408])(
+    "treats HTTP %i as an unconfirmed save (warning), not as a definite refusal",
+    async (status) => {
+      stubCapture(() => json({ detail: "Interner Fehler." }, status));
+      const root = await mount(<Feed route={FEED} share={null} />);
+      await type(root, "Hallo");
+      expect(notices(root)).toEqual([["notice warning", "status"]]);
+      const text = root.querySelector(".capture .notice-text")?.textContent ?? "";
+      expect(text).toContain(`Speichern nicht bestätigt (HTTP ${status}).`);
+      expect(text).not.toContain("Nicht gespeichert");
+      expect(text).toContain("kein Duplikat");
+      expect(root.querySelector(".notice.error")).toBeNull();
+      expect(root.querySelector(".notice.success")).toBeNull();
+    },
+  );
+
+  it.each([400, 413, 422])("keeps HTTP %i, a clear refusal, as an error", async (status) => {
+    stubCapture(() => json({ detail: "Abgelehnt." }, status));
+    const root = await mount(<Feed route={FEED} share={null} />);
+    await type(root, "Hallo");
+    expect(notices(root)).toEqual([["notice error", "alert"]]);
+    expect(root.querySelector(".capture .notice-text")?.textContent).toContain("Nicht gespeichert: Abgelehnt.");
+  });
+
+  it("retries an unconfirmed 5xx save with the same capture ID and then confirms it", async () => {
+    const bodies: { client_capture_id: string }[] = [];
+    let answer: () => Response = () => json({ detail: "Bad gateway" }, 502);
+    stubCapture(() => answer(), bodies);
+    const root = await mount(<Feed route={FEED} share={null} />);
+    await type(root, "Hallo");
+    expect(notices(root)).toEqual([["notice warning", "status"]]);
+    // The text stays in the box, so saving again is the retry.
+    expect(root.querySelector<HTMLTextAreaElement>("form.capture textarea")?.value).toBe("Hallo");
+
+    answer = () => json({ id: "a", duplicate_of: null });
+    await act(() => {
+      root.querySelector("form.capture")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    await settle();
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]?.client_capture_id).toBe(bodies[0]?.client_capture_id);
+    expect(notices(root)).toEqual([["notice success", "status"]]);
+  });
+
+  it("keeps a 5xx file upload pending with retry and discard", async () => {
+    const calls = stubCapture(() => json({ detail: "Timeout" }, 408));
+    const root = await mount(<Feed route={FEED} share={null} />);
+    await pick(root, "c.pdf");
+    expect(notices(root)).toEqual([
+      ["notice warning", "status"],
+      ["notice warning", "status"],
+    ]);
+    const labels = [...root.querySelectorAll(".capture .notice-actions button")].map((b) => b.textContent);
+    expect(labels).toEqual(["Erneut versuchen", "Verwerfen"]);
+    expect(calls).toHaveLength(1);
+  });
+
   it("shows an unanswered save as a warning, never as success", async () => {
     stubCapture(() => Promise.reject(new TypeError("Failed to fetch")));
     const root = await mount(<Feed route={FEED} share={null} />);
@@ -244,7 +359,7 @@ describe("capture feedback", () => {
   });
 
   it("discards an unconfirmed file without saving it", async () => {
-    const calls = stubCapture(() => json({ detail: "kaputt" }, 500));
+    const calls = stubCapture(() => json({ detail: "kaputt" }, 413));
     const root = await mount(<Feed route={FEED} share={null} />);
     await pick(root, "b.pdf");
     expect(notices(root)).toEqual([

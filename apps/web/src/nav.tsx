@@ -10,7 +10,7 @@ export function currentEntry(route: Route): "feed" | "organize" | "trash" | "tok
 }
 
 /**
- * Inline links on wide screens; on phones a single "Menü" button discloses them. The links stay in
+ * Inline links from 900 px; below that a single "Menü" button discloses them. The links stay in
  * the DOM either way (hidden by CSS only when closed), so touch, keyboard and screen readers get
  * the same set, including token management and sign-out.
  */
@@ -63,8 +63,8 @@ export function Nav({ route, user, onSignOut }: { route: Route; user: string; on
         {link("organize", href({ name: "organize" }), "Tags & Sammlungen")}
         {link("trash", href({ ...FEED, trashed: true }), "Papierkorb")}
         {link("tokens", href({ name: "tokens" }), "Token")}
-        <button type="button" class="link signout" onClick={onSignOut}>
-          Abmelden <span class="user">({user})</span>
+        <button type="button" class="link signout" onClick={onSignOut} title={`Abmelden (${user})`}>
+          Abmelden (<span class="user">{user}</span>)
         </button>
       </div>
     </nav>

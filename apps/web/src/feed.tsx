@@ -36,6 +36,14 @@ export function filterParams(filters: Filters): Record<string, string> {
   return params;
 }
 
+/**
+ * A server failure or timeout can happen after the item was stored, so the save is unconfirmed
+ * and a retry (same capture ID) is the answer. Other statuses are clear refusals.
+ */
+export function outcomeUnknown(status: number): boolean {
+  return status >= 500 || status === 408;
+}
+
 /** Same breakpoint as the stylesheet's wide layout. */
 function wideScreen(): boolean {
   return typeof matchMedia === "function" && matchMedia("(min-width: 720px)").matches;
@@ -114,6 +122,13 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
   const setFilter = (key: keyof Filters, value: string) => go({ filters: { ...route.filters, [key]: value } });
   const activeCount = Object.values(route.filters).filter(Boolean).length;
   const [filtersOpen, setFiltersOpen] = useState(() => activeCount > 0 || wideScreen());
+  // A filter set from elsewhere (tag link, other route) opens the section; collapsing it by hand
+  // stays possible until the filters change again.
+  const filtersKey = JSON.stringify(route.filters);
+  useEffect(() => {
+    if (activeCount > 0) setFiltersOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtersKey]);
 
   return (
     <>
@@ -293,9 +308,14 @@ function Capture({ onSaved, share }: { onSaved: () => void; share: ShareInput | 
       });
       return;
     }
-    const refused = failure instanceof ApiError;
+    const refused = failure instanceof ApiError && !outcomeUnknown(failure.status);
     // The notice itself already says "Fehler" or "Warnung"; the text only names the cause.
-    const reason = refused ? `Nicht gespeichert: ${failure.message.replace(/[.\s]+$/, "")}.` : "Speichern nicht bestätigt.";
+    const reason =
+      failure instanceof ApiError && refused
+        ? `Nicht gespeichert: ${failure.message.replace(/[.\s]+$/, "")}.`
+        : failure instanceof ApiError
+          ? `Speichern nicht bestätigt (HTTP ${failure.status}).`
+          : "Speichern nicht bestätigt.";
     setStatus({
       tone: refused ? "error" : "warning",
       text: `${saved ? `${saved} Datei(en) gespeichert. ` : ""}${reason} Unverändert erneut speichern legt kein Duplikat an; geänderte Eingaben werden als neue Erfassung gespeichert.`,
