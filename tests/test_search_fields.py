@@ -299,7 +299,7 @@ def test_matched_fields_report_only_real_matches(
     assert found(client, headers, '"budget q4"') == []
     # Filters keep working and results always name their own item's fields.
     only = search(client, headers, "vorlage OR budget", kind="url")["results"]
-    assert [(row["id"], row["matched_fields"]) for row in only] == [(link, ["note"])]
+    assert [(row["id"], row["matched_fields"]) for row in only] == [(link, ["note", "url"])]
     assert found(client, headers, "budget", tag="Q4") == [item]
     assert found(client, headers, "budget", tag="missing") == []
     assert found(client, headers, "budget", status="ready") == [item, link]
@@ -625,7 +625,8 @@ def test_unrelated_assignment_updates_do_not_reindex(
     sentinel = "'sentinel':1"
     with connection(settings) as conn:
         conn.execute(
-            "UPDATE item SET search_vector = %s::tsvector, search_head = %s::tsvector",
+            "UPDATE item SET search_vector = %s::tsvector, search_head = %s::tsvector, "
+            "search_names = 'sentinel'",
             (sentinel, sentinel),
         )
         # Provenance, confidence and timestamps are not searchable.
