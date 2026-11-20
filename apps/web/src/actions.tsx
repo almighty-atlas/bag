@@ -13,6 +13,8 @@ export interface ActionTarget {
   original_filename: string | null;
   /** The text of a text item when already loaded (item detail); the feed loads it on demand. */
   content?: string | null;
+  /** Merkliste state (ADR-0028); absent where pinning is not offered. */
+  pinned_at?: string | null;
 }
 
 export const hasOriginalFile = (item: Pick<ActionTarget, "kind">): boolean =>
@@ -78,10 +80,34 @@ const isAbort = (error: unknown) => error instanceof DOMException && error.name 
  * Open, copy, share and download for one item. `onDone` lets a menu close after an action;
  * the outcome stays visible next to the actions.
  */
-export function ItemActions({ item, onDone }: { item: ActionTarget; onDone?: () => void }) {
+export function ItemActions({
+  item,
+  onDone,
+  onPinned,
+}: {
+  item: ActionTarget;
+  onDone?: () => void;
+  /** Called with the server's new pin state; without it no Merken button is shown. */
+  onPinned?: (pinnedAt: string | null) => void;
+}) {
   const [status, setStatus] = useState<NoticeState | null>(null);
   const [busy, setBusy] = useState(false);
   const shareable = canShare() && (item.kind === "text" || item.kind === "url" || canShareFiles());
+  const pinned = Boolean(item.pinned_at);
+
+  // Only the server's answer changes the state shown; a failed request leaves it as it was.
+  const togglePin = async () => {
+    setBusy(true);
+    try {
+      const updated = pinned ? await api.unpin(item.id) : await api.pin(item.id);
+      onPinned?.(updated.pinned_at);
+      setStatus({ tone: "success", text: updated.pinned_at ? "Gemerkt." : "Von der Merkliste genommen." });
+    } catch {
+      setStatus({ tone: "error", text: pinned ? "Nicht von der Merkliste genommen." : "Nicht gemerkt. Bitte erneut versuchen." });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const copy = async () => {
     setBusy(true);
@@ -120,6 +146,11 @@ export function ItemActions({ item, onDone }: { item: ActionTarget; onDone?: () 
   return (
     <div class="item-actions">
       <div class="actions-list">
+        {onPinned && (
+          <button type="button" class="pin" aria-pressed={pinned} disabled={busy} onClick={() => void togglePin()}>
+            <span aria-hidden="true">{pinned ? "★" : "☆"}</span> {pinned ? "Gemerkt" : "Merken"}
+          </button>
+        )}
         {item.source_url && (
           <a class="button" href={item.source_url} target="_blank" rel="noopener noreferrer nofollow" onClick={onDone}>
             Link öffnen
@@ -148,7 +179,15 @@ export function ItemActions({ item, onDone }: { item: ActionTarget; onDone?: () 
  * The feed's compact "⋯" menu. A details element keeps it usable without scripts, by keyboard
  * and by touch; Escape and a tap outside close it.
  */
-export function ItemMenu({ item, label }: { item: ActionTarget; label: string }) {
+export function ItemMenu({
+  item,
+  label,
+  onPinned,
+}: {
+  item: ActionTarget;
+  label: string;
+  onPinned?: (pinnedAt: string | null) => void;
+}) {
   const [open, setOpen] = useState(false);
   const menu = useRef<HTMLDetailsElement>(null);
 
@@ -183,7 +222,7 @@ export function ItemMenu({ item, label }: { item: ActionTarget; label: string })
       {/* Rendered only while open: a closed row carries no extra links or buttons. */}
       {open && (
         <div class="actions-menu">
-          <ItemActions item={item} />
+          <ItemActions item={item} {...(onPinned ? { onPinned } : {})} />
         </div>
       )}
     </details>

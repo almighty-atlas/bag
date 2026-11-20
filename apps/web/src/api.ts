@@ -17,6 +17,8 @@ export interface ItemSummary {
   processing_status: string;
   /** A stored preview exists to try; a hint only, loading it can still fail (see thumbnail.tsx). */
   thumbnail_available: boolean;
+  /** Set while the item is on the Merkliste (ADR-0028). */
+  pinned_at: string | null;
   created_at: string;
   captured_at: string;
   updated_at: string;
@@ -40,6 +42,7 @@ export interface ItemDetail {
   collections: string[];
   processing_status: string;
   thumbnail_available: boolean;
+  pinned_at: string | null;
   created_at: string;
   captured_at: string;
   updated_at: string;
@@ -142,6 +145,10 @@ export const api = {
     request<ItemDetail>(`/api/v1/items/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }),
   trash: (id: string) => request<void>(`/api/v1/items/${encodeURIComponent(id)}`, { method: "DELETE" }),
   restore: (id: string) => request<ItemDetail>(`/api/v1/items/${encodeURIComponent(id)}/restore`, { method: "POST" }),
+  pin: (id: string) => request<ItemDetail>(`/api/v1/items/${encodeURIComponent(id)}/pin`, { method: "PUT" }),
+  unpin: (id: string) => request<ItemDetail>(`/api/v1/items/${encodeURIComponent(id)}/pin`, { method: "DELETE" }),
+  pins: (params: Record<string, string>) =>
+    request<{ items: ItemSummary[]; next_offset: number | null }>(`/api/v1/pins?${new URLSearchParams(params)}`),
 };
 
 export interface ApiToken {

@@ -246,6 +246,8 @@ h1 { overflow-wrap: anywhere; }
 .actions-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .item-row.with-menu > .item { padding-right: 52px; }
 .row-actions { position: absolute; top: 6px; right: 6px; z-index: 2; }
+/* An open menu lies above the rows after it, including their own "⋯" buttons. */
+.row-actions[open] { z-index: 10; }
 .row-actions > summary {
   list-style: none; display: grid; place-items: center; width: 44px; height: 44px;
   border-radius: 10px; cursor: pointer; color: var(--muted); font-size: 22px; line-height: 1;
@@ -261,3 +263,5 @@ h1 { overflow-wrap: anywhere; }
 .actions-menu .item-actions { margin: 0; }
 .actions-menu .actions-list { flex-direction: column; align-items: stretch; }
 .actions-menu .actions-list > * { text-align: left; }
+.meta .pinned { color: var(--accent); font-weight: 600; }
+button.pin[aria-pressed="true"] { background: transparent; color: var(--accent); border: 1px solid var(--accent); }

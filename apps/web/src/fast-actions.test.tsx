@@ -372,6 +372,7 @@ describe("item actions", () => {
     expect(rowsText[2]).toContain("kaputt");
     const actions = root.querySelector(".detail > .item-actions")!;
     expect([...actions.querySelectorAll("a, button")].map((node) => node.textContent)).toEqual([
+      "☆ Merken",
       "Original herunterladen",
       "Link zum Eintrag kopieren",
     ]);

@@ -143,7 +143,7 @@ export function ItemView({ id }: { id: string }) {
         {itemStatusLabel(item.processing_status)}
         {item.language && <> · Sprache {languageLabel(item.language)}</>}
       </p>
-      <ItemActions item={item} />
+      <ItemActions item={item} onPinned={(pinnedAt) => setItem((old) => old && { ...old, pinned_at: pinnedAt })} />
       {imageState !== "none" && (
         <div class="detail-preview">
           <Thumbnail key={item.id} id={item.id} alt={thumbnailAlt(item)} state={imageState} variant="detail" />

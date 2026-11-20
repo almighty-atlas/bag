@@ -1,29 +1,17 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 
-import { ItemMenu } from "./actions";
-import { ApiError, api, looksLikeUrl, organize, type MatchedField, type NamedEntry } from "./api";
+import { ApiError, api, looksLikeUrl, organize, type NamedEntry } from "./api";
 import { EMPTY_FILTERS, href, type Filters, type Route } from "./app";
 import { canReadClipboard, clipboardFiles, inEditable, readClipboard } from "./clipboard";
 import { isPending, mergeDetails, usePendingRefresh } from "./feed-refresh";
-import { feedText, type FeedItem } from "./feed-text";
-import { itemStatusLabel, kindLabel } from "./labels";
-import { matchReasons } from "./match-reasons";
+import { ItemRow, KIND_ICON, type Row } from "./item-row";
+import { kindLabel } from "./labels";
 import { Notice, type NoticeState } from "./notice";
 import { PendingShares, DISCARD_CONFIRMATION } from "./pending";
 import { CaptureKeys, uploadFiles, type PendingFile } from "./retry";
 import type { ShareDraft } from "./share";
 import { BatchGoneError, MissingFilesError, discardBatch, remainingFiles, saveBatch, type ShareBatch } from "./share-store";
-import { Thumbnail, previewState, thumbnailAlt } from "./thumbnail";
 
-type Row = FeedItem & { matched_fields?: MatchedField[]; rank?: number };
-
-const KIND_ICON: Record<string, string> = {
-  text: "📝",
-  url: "🔗",
-  image: "🖼️",
-  document: "📄",
-  file: "📦",
-};
 
 /** Query parameters for the API: dates become timezone-aware day boundaries. */
 export function filterParams(filters: Filters): Record<string, string> {
@@ -237,61 +225,18 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
         <p class="hint">{route.trashed ? "Der Papierkorb ist leer." : "Noch nichts in der Tasche."}</p>
       )}
       <ul class="items">
-        {rows.map((row) => {
-          const text = feedText(row);
-          const reasons = matchReasons(row.matched_fields, row.rank);
-          const preview = previewState(row, { trashed: route.trashed || row.deleted_at !== null });
-          const withThumb = preview !== "none" && preview !== "trashed";
-          return (
-            <li key={row.id} class={route.trashed ? "item-row" : "item-row with-menu"}>
-              {route.trashed && (
-                <button
-                  type="button"
-                  class="restore"
-                  onClick={() => void api.restore(row.id).then(() => load(false))}
-                >
-                  Wiederherstellen
-                </button>
-              )}
-              <a
-                href={route.trashed ? undefined : href({ name: "item", id: row.id })}
-                class={withThumb ? "item with-thumb" : "item"}
-              >
-                {withThumb ? (
-                  <Thumbnail key={row.id} id={row.id} alt={thumbnailAlt(row)} state={preview} variant="card" />
-                ) : (
-                  <span class="icon" aria-hidden="true">
-                    {KIND_ICON[row.kind] ?? "❔"}
-                  </span>
-                )}
-                <span class="body">
-                  <span class={text.headline === row.excerpt ? "title clamp" : "title"}>{text.headline}</span>
-                  {text.details.map((line) => (
-                    <span class={line === row.excerpt ? "snippet clamp" : "snippet"} key={line}>
-                      {line}
-                    </span>
-                  ))}
-                  {reasons && <span class="reasons">{reasons}</span>}
-                  <span class="meta">
-                    {new Date(row.captured_at).toLocaleString()} · {kindLabel(row.kind)}
-                    {row.processing_status !== "ready" && <> · {itemStatusLabel(row.processing_status)}</>}
-                    {row.tags.map((tag) => (
-                      <a
-                        class="tag"
-                        key={tag}
-                        href={href({ ...route, filters: { ...route.filters, tag } })}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {tag}
-                      </a>
-                    ))}
-                  </span>
-                </span>
-              </a>
-              {!route.trashed && <ItemMenu item={row} label={text.headline} />}
-            </li>
-          );
-        })}
+        {rows.map((row) => (
+          <ItemRow
+            key={row.id}
+            row={row}
+            route={route}
+            trashed={route.trashed}
+            onRestore={() => void api.restore(row.id).then(() => load(false))}
+            onPinned={(pinnedAt) =>
+              setRows((old) => old.map((entry) => (entry.id === row.id ? { ...entry, pinned_at: pinnedAt } : entry)))
+            }
+          />
+        ))}
       </ul>
       {next !== null && (
         <button type="button" onClick={() => void load(true)} disabled={loading}>

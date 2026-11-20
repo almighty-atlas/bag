@@ -52,7 +52,7 @@ describe("navigation", () => {
   it("keeps every destination, renames Tags to Tags & Sammlungen and still offers token management and sign-out", async () => {
     const onSignOut = vi.fn();
     const root = await mount(nav(FEED, onSignOut));
-    expect(labels(root)).toEqual(["Feed", "Tags & Sammlungen", "Papierkorb", "Token"]);
+    expect(labels(root)).toEqual(["Feed", "Merkliste", "Tags & Sammlungen", "Papierkorb", "Token"]);
     expect(root.querySelector('a[href="#/organize"]')?.textContent).toBe("Tags & Sammlungen");
     expect(root.querySelector('a[href="#/tokens"]')).not.toBeNull();
     const signOut = root.querySelector<HTMLButtonElement>(".signout");
