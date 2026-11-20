@@ -12,7 +12,7 @@ import type { ShareDraft } from "./share";
 import { BatchGoneError, MissingFilesError, discardBatch, remainingFiles, saveBatch, type ShareBatch } from "./share-store";
 import { Thumbnail, previewState, thumbnailAlt } from "./thumbnail";
 
-type Row = FeedItem & { matched_fields?: MatchedField[] };
+type Row = FeedItem & { matched_fields?: MatchedField[]; rank?: number };
 
 const KIND_ICON: Record<string, string> = {
   text: "📝",
@@ -236,7 +236,7 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
       <ul class="items">
         {rows.map((row) => {
           const text = feedText(row);
-          const reasons = matchReasons(row.matched_fields);
+          const reasons = matchReasons(row.matched_fields, row.rank);
           const preview = previewState(row, { trashed: route.trashed || row.deleted_at !== null });
           const withThumb = preview !== "none" && preview !== "trashed";
           return (

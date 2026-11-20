@@ -15,6 +15,14 @@ describe("match reasons", () => {
     expect(matchReasons(undefined)).toBeNull();
   });
 
+  it("tells partial hits from whole-word hits by their rank", () => {
+    expect(matchReasons(["tag"], 0.6)).toBe("Teiltreffer in: Tag");
+    expect(matchReasons(["filename"], 0.25)).toBe("Teiltreffer in: Dateiname");
+    expect(matchReasons(["tag"], 1)).toBe("Gefunden in: Tag");
+    expect(matchReasons(["tag"], 9.5)).toBe("Gefunden in: Tag");
+    expect(matchReasons([], 0.5)).toBeNull();
+  });
+
   it("ignores fields a newer server may add", () => {
     expect(matchReasons(["tag", "future" as never])).toBe("Gefunden in: Tag");
     expect(matchReasons(["future" as never])).toBeNull();
