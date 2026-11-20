@@ -92,7 +92,8 @@ another (`0005_search_fields`) that re-indexes every item for filename and tag s
 a third (`0006_search_partial`, creates the `pg_trgm` extension, backfills a second
 small search vector and builds two indexes) for prefix and substring search and a fourth
 (`0007_search_followups`, creates the `unaccent` extension and rebuilds every search vector)
-for accent folding, URL words and substrings in titles and tags, each in one
+for accent folding, URL words and substrings in titles and tags, plus `0008_pinned` (adds
+the Merkliste column, no rewrite), each in one
 transaction (`0006` and `0007` also need `VACUUM ANALYZE item` afterwards), so back up first, stop or idle the API and worker, and run
 `bag migrate` before starting the new containers; until then `/ready` reports
 `not_ready` on purpose. Tokens and data are preserved:
@@ -216,6 +217,22 @@ curl --fail-with-body -sS "http://localhost:8000/api/v1/items?tag=todo" \
 `POST` with `{"name": "..."}` creates one ahead of time, `PATCH /api/v1/tags/{id}`
 renames and `DELETE` removes a name with its assignments (items stay). Both
 filters also work on `/api/v1/search`.
+
+## Merkliste
+
+Pin an item to keep it at hand on every device; pinning changes nothing about the item
+itself. Both calls are safe to repeat, and the list is newest pin first:
+
+```sh
+curl --fail-with-body -sS -X PUT "http://localhost:8000/api/v1/items/$ITEM_ID/pin" \
+  -H "Authorization: Bearer $BAG_TOKEN"
+curl --fail-with-body -sS "http://localhost:8000/api/v1/pins" -H "Authorization: Bearer $BAG_TOKEN"
+curl --fail-with-body -sS -X DELETE "http://localhost:8000/api/v1/items/$ITEM_ID/pin" \
+  -H "Authorization: Bearer $BAG_TOKEN"
+```
+
+Listing and search also accept `pinned=true`. In the web UI use "Merken" in an entry's "⋯"
+menu or item view, and the "Merkliste" page in the menu.
 
 ## Trash and restore
 

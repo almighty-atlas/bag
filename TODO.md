@@ -107,9 +107,12 @@ retrieval is done and tested; the client check is the open item above).
 - [ ] **Shelf follow-ups:** tags/collections remain in filters or secondary
       organization; keep the browser upload fallback where native share
       integration is absent.
-- [ ] **Merkliste:** ADR for pinned_at versus a reserved collection,
-      then cross-device pin/unpin and accessible list. No tasks/reminders
-      or second item store.
+- [x] **Merkliste** ([ADR-0028](docs/decisions/0028-merkliste-pinned-at.md), migration
+      `0008_pinned`): `item.pinned_at`, `PUT`/`DELETE /items/{id}/pin`, `GET /pins`,
+      `pinned` filter, export/import; "Merken" in menu and item view, Merkliste page
+      with undo.
+- [ ] **Merkliste on real devices:** pin on one device, see it on the second after a
+      reload (macOS, Android, iPhone PWA); screen reader pass of the toggle and undo.
 
 **3B done when:** users can recognize, open and reuse saved text, images,
 links and files on both macOS and Android; unsafe originals are never

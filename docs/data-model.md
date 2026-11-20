@@ -4,8 +4,8 @@ Migration `0001_foundation` creates the tables below; `0002_jobs` adds `job`,
 `0003_active_job` its unique active-job index, `0004_sessions` the web login
 columns and `session` table, `0005_search_fields` the trigger-maintained weighted
 search vector, `0006_search_partial` the head vector and filename trigram index
-for prefix and substring search, and `0007_search_followups` accent folding, URL words and
-the `search_names` substring keys (all below). All
+for prefix and substring search, `0007_search_followups` accent folding, URL words and
+the `search_names` substring keys, and `0008_pinned` the Merkliste column (all below). All
 have server-generated UUIDv7 primary keys. Timestamps use `timestamptz`; API
 connections use UTC. `user` is the ownership root; every other table has `owner_id`.
 
@@ -134,6 +134,12 @@ exported. `item_names_trgm_idx` is a `pg_trgm` GIN index over it and replaced
 URL, filename and tag words, and the words of URL host and path; `search_vector` stores the
 extracted text (D) before the other fields, which lets tag changes keep that part. `bag_prefix_query` turns a parsed query into prefix operands
 (typed words of at least two characters; exclusions stay exact).
+
+`item.pinned_at` (ADR-0028, `0008_pinned`) is set while an item is on the Merkliste; pinning
+again keeps the first time and unpinning clears it. The partial index `item_pinned_idx`
+`(owner_id, pinned_at DESC, id DESC) WHERE pinned_at IS NOT NULL` serves the list. It is
+exported and imported with the item; exports without it import as not pinned. The migration
+only adds the column and the empty index (no rewrite); its downgrade drops both and every pin.
 
 Deletion is soft: `DELETE` sets `deleted_at` (kept on repeats), restore clears it,
 and both bump `updated_at` only when the state changes. Detail routes hide rows
