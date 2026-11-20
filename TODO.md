@@ -88,9 +88,13 @@ retrieval is done and tested; the client check is the open item above).
 - [ ] **Thumbnail follow-ups:** measure worker memory on the production host
       against ADR-0023's 1 GiB child limit; decide on HEIC/AVIF and color
       profile handling if real captures need them.
-- [ ] **Fast actions:** clipboard paste for text and supported images;
-      context actions to open/copy/share/download; user-friendly
-      processing status instead of raw processor names.
+- [x] **Fast actions** ([ADR-0027](docs/decisions/0027-fast-actions.md)): paste of
+      images and files (field or page) uploads at once, pasted text fills the form,
+      "Einfügen" button; "⋯" menu per feed row and detail actions to open, download,
+      copy and share; German labels for kinds, states and processors.
+- [ ] **Fast actions on real devices:** paste on Android/iOS (long press), Safari and
+      Firefox clipboard permission prompts, sharing files from the installed PWA, copy
+      of a long text in Safari (pending ClipboardItem), screen reader pass of the menu.
 - [x] **Mobile-first layout, navigation and status messages**
       ([ADR-0024](docs/decisions/0024-mobile-first-web-ui.md)): menu button on
       phones, "Tags & Sammlungen", capture and search first, labelled collapsible

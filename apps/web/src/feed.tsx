@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 
+import { ItemMenu } from "./actions";
 import { ApiError, api, looksLikeUrl, organize, type MatchedField, type NamedEntry } from "./api";
 import { EMPTY_FILTERS, href, type Filters, type Route } from "./app";
+import { canReadClipboard, clipboardFiles, inEditable, readClipboard } from "./clipboard";
 import { isPending, mergeDetails, usePendingRefresh } from "./feed-refresh";
 import { feedText, type FeedItem } from "./feed-text";
+import { itemStatusLabel, kindLabel } from "./labels";
 import { matchReasons } from "./match-reasons";
 import { Notice, type NoticeState } from "./notice";
 import { PendingShares, DISCARD_CONFIRMATION } from "./pending";
@@ -175,7 +178,7 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
               <option value="">alle Arten</option>
               {["text", "url", "image", "document", "file"].map((kind) => (
                 <option value={kind} key={kind}>
-                  {KIND_ICON[kind]} {kind}
+                  {KIND_ICON[kind]} {kindLabel(kind)}
                 </option>
               ))}
             </select>
@@ -240,7 +243,7 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
           const preview = previewState(row, { trashed: route.trashed || row.deleted_at !== null });
           const withThumb = preview !== "none" && preview !== "trashed";
           return (
-            <li key={row.id} class="item-row">
+            <li key={row.id} class={route.trashed ? "item-row" : "item-row with-menu"}>
               {route.trashed && (
                 <button
                   type="button"
@@ -270,8 +273,8 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
                   ))}
                   {reasons && <span class="reasons">{reasons}</span>}
                   <span class="meta">
-                    {new Date(row.captured_at).toLocaleString()} · {row.kind}
-                    {row.processing_status !== "ready" && <> · {row.processing_status}</>}
+                    {new Date(row.captured_at).toLocaleString()} · {kindLabel(row.kind)}
+                    {row.processing_status !== "ready" && <> · {itemStatusLabel(row.processing_status)}</>}
                     {row.tags.map((tag) => (
                       <a
                         class="tag"
@@ -285,6 +288,7 @@ export function Feed({ route, share }: { route: Route & { name: "feed" }; share:
                   </span>
                 </span>
               </a>
+              {!route.trashed && <ItemMenu item={row} label={text.headline} />}
             </li>
           );
         })}
@@ -404,10 +408,48 @@ function Capture({ onSaved, share }: { onSaved: () => void; share: ShareInput | 
     }
   };
 
-  const upload = async (files: FileList | null) => {
+  const upload = async (files: FileList | File[] | null) => {
     if (!files || files.length === 0) return;
     const fileNote = note.trim() || null;
     await sendFiles(Array.from(files, (file) => ({ file, note: fileNote })));
+  };
+
+  const textArea = useRef<HTMLTextAreaElement>(null);
+  // Pasted text is only placed in the form: saving it stays an explicit "In die Tasche".
+  const pasteText = (pasted: string) => {
+    setText((current) => (current.trim() ? `${current.replace(/\s+$/, "")}\n${pasted}` : pasted));
+    textArea.current?.focus();
+    setStatus({ tone: "warning", text: "Eingefügt, noch nicht gespeichert. „In die Tasche“ speichert es." });
+  };
+
+  // Ctrl+V / Cmd+V anywhere on the page outside a text field: files and images are saved like
+  // a drop, text goes into the form.
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      if (inEditable(event.target) || busy) return;
+      const files = clipboardFiles(event.clipboardData);
+      const pasted = event.clipboardData?.getData("text/plain") ?? "";
+      if (files.length === 0 && !pasted.trim()) return;
+      event.preventDefault();
+      if (files.length > 0) void upload(files);
+      else pasteText(pasted);
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  });
+
+  const pasteFromClipboard = async () => {
+    try {
+      const content = await readClipboard();
+      if (content === null) setStatus({ tone: "warning", text: "Die Zwischenablage ist leer." });
+      else if ("files" in content) await upload(content.files);
+      else pasteText(content.text);
+    } catch {
+      setStatus({
+        tone: "error",
+        text: "Kein Zugriff auf die Zwischenablage. Bitte mit Strg+V (⌘V) oder lange tippen → Einfügen in das Textfeld einfügen.",
+      });
+    }
   };
 
   return (
@@ -421,8 +463,16 @@ function Capture({ onSaved, share }: { onSaved: () => void; share: ShareInput | 
       }}
     >
       <textarea
+        ref={textArea}
         aria-label="Text, Link oder Gedanken"
-        placeholder="Text, Link oder Gedanken hier ablegen… (Dateien per Drag & Drop)"
+        placeholder="Text, Link oder Gedanken hier ablegen… (Bilder und Dateien einfügen oder hierher ziehen)"
+        onPaste={(e) => {
+          // A pasted image or file is saved right away; pasted text stays plain typing.
+          const files = clipboardFiles(e.clipboardData);
+          if (files.length === 0) return;
+          e.preventDefault();
+          void upload(files);
+        }}
         value={text}
         rows={3}
         onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
@@ -455,6 +505,11 @@ function Capture({ onSaved, share }: { onSaved: () => void; share: ShareInput | 
           />
           <span aria-hidden="true">📎</span> Dateien hochladen
         </label>
+        {canReadClipboard() && (
+          <button type="button" class="secondary" disabled={busy} onClick={() => void pasteFromClipboard()}>
+            <span aria-hidden="true">📋</span> Einfügen
+          </button>
+        )}
         <button type="submit" disabled={busy || (!text.trim() && !pendingShare)}>
           In die Tasche
         </button>

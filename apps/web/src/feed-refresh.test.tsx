@@ -100,15 +100,15 @@ describe("feed refresh", () => {
   it("follows queued → processing → ready without a reload and then stops polling", async () => {
     const bag = server([summary({ id: A, processing_status: "queued", title: "Neu" })]);
     const root = await mountFeed();
-    expect(meta(root)).toContain("queued");
+    expect(meta(root)).toContain("wartet auf Verarbeitung");
 
     bag.set(A, { processing_status: "processing" });
     await advance(REFRESH_BASE_MS);
-    expect(meta(root)).toContain("processing");
+    expect(meta(root)).toContain("wird verarbeitet");
 
     bag.set(A, { processing_status: "ready", title: "Fertiger Titel" });
     await advance(REFRESH_BASE_MS * 2);
-    expect(meta(root)).not.toMatch(/queued|processing/);
+    expect(meta(root)).not.toMatch(/wartet|wird verarbeitet/);
     expect(root.querySelector("li.item-row .title")?.textContent).toBe("Fertiger Titel");
 
     const calls = bag.itemCalls.length;
@@ -124,7 +124,7 @@ describe("feed refresh", () => {
     const root = await mountFeed();
     bag.set(A, { processing_status: "failed" });
     await advance(REFRESH_BASE_MS);
-    expect(meta(root)).toContain("failed");
+    expect(meta(root)).toContain("Verarbeitung fehlgeschlagen");
     const calls = bag.itemCalls.length;
     await advance(REFRESH_BASE_MS * 10);
     expect(bag.itemCalls.length).toBe(calls);
@@ -163,7 +163,7 @@ describe("feed refresh", () => {
     setVisibility("visible");
     await advance(0);
     expect(bag.itemCalls).toEqual([A]);
-    expect(meta(root)).not.toContain("queued");
+    expect(meta(root)).not.toContain("wartet auf Verarbeitung");
   });
 
   it("backs off on network errors, recovers, and stops with a manual retry after repeated failure", async () => {
@@ -182,7 +182,7 @@ describe("feed refresh", () => {
     bag.fail = false;
     bag.set(A, { processing_status: "ready" });
     await advance(REFRESH_BASE_MS * 4);
-    expect(meta(root)).not.toContain("queued");
+    expect(meta(root)).not.toContain("wartet auf Verarbeitung");
     expect(root.textContent).not.toContain("pausiert");
   });
 
@@ -196,14 +196,14 @@ describe("feed refresh", () => {
     expect(vi.getTimerCount()).toBe(0);
     // The card keeps showing what it knew; nothing is reported as an error.
     expect(root.querySelector(".error")).toBeNull();
-    expect(meta(root)).toContain("queued");
+    expect(meta(root)).toContain("wartet auf Verarbeitung");
 
     bag.fail = false;
     bag.set(A, { processing_status: "ready" });
     const button = [...root.querySelectorAll("button")].find((b) => b.textContent === "Jetzt aktualisieren")!;
     await act(() => button.click());
     await advance(REFRESH_BASE_MS);
-    expect(meta(root)).not.toContain("queued");
+    expect(meta(root)).not.toContain("wartet auf Verarbeitung");
     expect(root.textContent).not.toContain("pausiert");
   });
 
@@ -230,8 +230,8 @@ describe("feed refresh", () => {
     bag.set(ids[10]!, { processing_status: "ready" });
     await advance(REFRESH_BASE_MS * 3);
     expect(bag.itemCalls).toContain(ids[10]);
-    expect(meta(root, 10)).not.toContain("queued");
-    expect(meta(root, 0)).toContain("queued");
+    expect(meta(root, 10)).not.toContain("wartet auf Verarbeitung");
+    expect(meta(root, 0)).toContain("wartet auf Verarbeitung");
   });
 
   it("removes its timer and listener on unmount, even with a request in flight", async () => {
@@ -283,7 +283,7 @@ describe("feed refresh", () => {
     await advance(0);
 
     expect(root.querySelector("li.item-row .title")?.textContent).toBe("Alt");
-    expect(meta(root)).toContain("queued");
+    expect(meta(root)).toContain("wartet auf Verarbeitung");
   });
 
   it("ignores items that disappeared and does not poll them forever", async () => {
@@ -309,7 +309,7 @@ describe("feed refresh", () => {
     bag.set(A, { processing_status: "ready" });
     await advance(REFRESH_BASE_MS);
 
-    expect(meta(root)).not.toContain("queued");
+    expect(meta(root)).not.toContain("wartet auf Verarbeitung");
     expect(bag.listCalls).toBe(lists);
     expect(root.querySelector("input[type=search]")).toBe(search);
     expect(search.value).toBe("alt");
