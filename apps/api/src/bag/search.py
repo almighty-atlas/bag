@@ -13,7 +13,8 @@ from bag.schemas import ItemPage, ItemSummary, SearchPage, SearchResult
 
 SUMMARY_COLUMNS = (
     "id, kind, source, title, user_note, mime_type, original_filename, source_url, language, "
-    f"processing_status, created_at, captured_at, updated_at, deleted_at, {TAGS_SQL}, "
+    "processing_status, pinned_at, created_at, captured_at, updated_at, deleted_at, "
+    f"{TAGS_SQL}, "
     f"{COLLECTIONS_SQL}, {THUMBNAIL_AVAILABLE_SQL}, "
     # Only a bounded prefix of text originals leaves the database; see bag.excerpt.
     f"CASE WHEN kind = 'text' THEN substr(content, 1, {SOURCE_CHARS}) END AS excerpt_source"
@@ -265,7 +266,7 @@ def _with_name_snippet(row: dict[str, Any], needles: list[str]) -> dict[str, Any
     return row
 
 
-def _summary(row: dict[str, Any]) -> dict[str, Any]:
+def summary_row(row: dict[str, Any]) -> dict[str, Any]:
     source = row.pop("excerpt_source")
     return {**row, "excerpt": make_excerpt(source)}
 
@@ -280,10 +281,13 @@ def _filters(
     trashed: bool,
     tag: str | None = None,
     collection: str | None = None,
+    pinned: bool | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     clauses = ["item.owner_id = %(owner_id)s"]
     params: dict[str, Any] = {"owner_id": owner_id}
     clauses.append("deleted_at IS NOT NULL" if trashed else "deleted_at IS NULL")
+    if pinned is not None:
+        clauses.append("pinned_at IS NOT NULL" if pinned else "pinned_at IS NULL")
     for name, value in (("tag", tag), ("collection", collection)):
         if value is not None:
             clauses.append(NAMED_FILTER[name])
@@ -316,6 +320,7 @@ def list_items(
     trashed: bool = False,
     tag: str | None = None,
     collection: str | None = None,
+    pinned: bool | None = None,
 ) -> ItemPage:
     clauses, params = _filters(
         owner_id,
@@ -326,6 +331,7 @@ def list_items(
         trashed=trashed,
         tag=tag,
         collection=collection,
+        pinned=pinned,
     )
     if cursor is not None:
         # UUIDv7 keys are time-ordered, so keyset pagination follows capture order.
@@ -338,7 +344,7 @@ def list_items(
             "ORDER BY id DESC LIMIT %(limit)s",
             params,
         ).fetchall()
-    items = [ItemSummary.model_validate(_summary(row)) for row in rows[:limit]]
+    items = [ItemSummary.model_validate(summary_row(row)) for row in rows[:limit]]
     next_cursor = items[-1].id if len(rows) > limit else None
     return ItemPage(items=items, next_cursor=next_cursor)
 
@@ -472,6 +478,7 @@ def search_items(
     trashed: bool = False,
     tag: str | None = None,
     collection: str | None = None,
+    pinned: bool | None = None,
 ) -> SearchPage:
     clauses, params = _filters(
         owner_id,
@@ -482,6 +489,7 @@ def search_items(
         trashed=trashed,
         tag=tag,
         collection=collection,
+        pinned=pinned,
     )
     words = _plain_words(q)
     likes = substring_patterns(words)
@@ -516,7 +524,7 @@ def search_items(
             rows += conn.execute(_partial_sql(clauses, whole, words, likes), params).fetchall()
     needles = _needles(q)
     results = [
-        SearchResult.model_validate(_with_name_snippet(_summary(row), needles))
+        SearchResult.model_validate(_with_name_snippet(summary_row(row), needles))
         for row in rows[:limit]
     ]
     return SearchPage(

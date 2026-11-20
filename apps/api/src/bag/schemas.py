@@ -172,6 +172,8 @@ class ItemResponse(BaseModel):
     processing_status: str
     # Whether GET /items/{id}/thumbnail has a stored preview to try; see bag.preview.
     thumbnail_available: bool
+    # Set while the item is on the Merkliste (ADR-0028).
+    pinned_at: datetime | None
     created_at: datetime
     captured_at: datetime
     updated_at: datetime
@@ -192,6 +194,7 @@ class ItemSummary(BaseModel):
     collections: list[str]
     processing_status: str
     thumbnail_available: bool
+    pinned_at: datetime | None
     created_at: datetime
     captured_at: datetime
     updated_at: datetime
@@ -201,6 +204,13 @@ class ItemSummary(BaseModel):
 class ItemPage(BaseModel):
     items: list[ItemSummary]
     next_cursor: UUID | None
+
+
+class PinnedPage(BaseModel):
+    """The Merkliste, newest pin first; paged by offset because it stays small."""
+
+    items: list[ItemSummary]
+    next_offset: int | None
 
 
 MatchedField = Literal["title", "filename", "tag", "note", "url", "content"]

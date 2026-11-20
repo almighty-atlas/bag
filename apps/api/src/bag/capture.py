@@ -184,7 +184,7 @@ def get_item(settings: Settings, owner_id: UUID, item_id: UUID) -> ItemResponse:
         row = conn.execute(
             "SELECT id, kind, source, title, content, user_note, mime_type, original_filename, "
             "content_hash, source_url, extracted_text, language, "
-            f"processing_status, created_at, captured_at, updated_at, {TAGS_SQL}, "
+            f"processing_status, pinned_at, created_at, captured_at, updated_at, {TAGS_SQL}, "
             f"{COLLECTIONS_SQL}, {THUMBNAIL_AVAILABLE_SQL} FROM item "
             "WHERE owner_id = %s AND id = %s AND deleted_at IS NULL",
             (owner_id, item_id),

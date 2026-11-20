@@ -42,6 +42,7 @@ from bag.db import connection, ready
 from bag.download import download
 from bag.logging import configure_logging
 from bag.organize import Kind, create_named, delete_named, list_named, rename_named
+from bag.pins import list_pinned, set_pinned
 from bag.preview import thumbnail as preview_thumbnail
 from bag.ratelimit import FailureLimiter
 from bag.schemas import (
@@ -53,6 +54,7 @@ from bag.schemas import (
     LoginRequest,
     NameCreate,
     NamedResponse,
+    PinnedPage,
     ProcessingRunResponse,
     SearchPage,
     SessionResponse,
@@ -316,6 +318,7 @@ def create_app(
         trashed: bool = False,
         tag: Name = None,
         collection: Name = None,
+        pinned: bool | None = None,
     ) -> dict[str, Any]:
         for value in (tag, collection):
             if value is not None and "\x00" in value:
@@ -328,6 +331,7 @@ def create_app(
             "trashed": trashed,
             "tag": tag,
             "collection": collection,
+            "pinned": pinned,
         }
 
     def named_routes(kind: Kind) -> None:
@@ -395,6 +399,22 @@ def create_app(
         item_id: UUID, payload: ItemUpdate, actor: Annotated[Identity, Depends(identity)]
     ) -> ItemResponse:
         return update_item(settings, actor.owner_id, item_id, payload)
+
+    @app.get("/api/v1/pins", response_model=PinnedPage)
+    def pins(
+        actor: Annotated[Identity, Depends(identity)],
+        limit: Limit = 50,
+        offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
+    ) -> PinnedPage:
+        return list_pinned(settings, actor.owner_id, limit=limit, offset=offset)
+
+    @app.put("/api/v1/items/{item_id}/pin", response_model=ItemResponse)
+    def pin(item_id: UUID, actor: Annotated[Identity, Depends(identity)]) -> ItemResponse:
+        return set_pinned(settings, actor.owner_id, item_id, True)
+
+    @app.delete("/api/v1/items/{item_id}/pin", response_model=ItemResponse)
+    def unpin(item_id: UUID, actor: Annotated[Identity, Depends(identity)]) -> ItemResponse:
+        return set_pinned(settings, actor.owner_id, item_id, False)
 
     @app.delete("/api/v1/items/{item_id}", status_code=204)
     def trash(item_id: UUID, actor: Annotated[Identity, Depends(identity)]) -> Response:
