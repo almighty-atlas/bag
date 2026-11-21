@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -32,26 +33,38 @@ NAMED_FILTER = {
 # Query every configuration: a German query stems for German items, English for
 # English ones, and simple matches exact tokens in items without a language. Hyphenated,
 # underscored and dotted words are also tried split into their parts, because filenames and
-# tags are indexed split ('kaffee-sorten' finds 'Kaffee_Sorten.pdf').
+# tags are indexed split ('kaffee-sorten' finds 'Kaffee_Sorten.pdf'). The accent-free form
+# finds the folded words of titles, names, notes and URLs ('café' and 'cafe' find 'Café';
+# migration 0007).
 QUERY_SQL = (
     "(websearch_to_tsquery('simple', %(q)s) || websearch_to_tsquery('german', %(q)s) "
     "|| websearch_to_tsquery('english', %(q)s) "
     "|| websearch_to_tsquery('simple', %(q_split)s) "
     "|| websearch_to_tsquery('german', %(q_split)s) "
-    "|| websearch_to_tsquery('english', %(q_split)s))"
+    "|| websearch_to_tsquery('english', %(q_split)s) "
+    "|| websearch_to_tsquery('simple', bag_fold(%(q)s)) "
+    "|| websearch_to_tsquery('simple', bag_fold(%(q_split)s)))"
 )
 # The words as typed, without stemming; only these get a prefix (see bag_prefix_query).
-TYPED_SQL = "(websearch_to_tsquery('simple', %(q)s) || websearch_to_tsquery('simple', %(q_split)s))"
+TYPED_SQL = (
+    "(websearch_to_tsquery('simple', %(q)s) || websearch_to_tsquery('simple', %(q_split)s) "
+    "|| websearch_to_tsquery('simple', bag_fold(%(q)s)) "
+    "|| websearch_to_tsquery('simple', bag_fold(%(q_split)s)))"
+)
 # A joining separator sits between two letters or digits; a leading '-' stays an exclusion.
 _JOINERS = re.compile(r"(?<=[^\W_])[-_.](?=[^\W_])")
 # Partial matching (ADR-0025), run only when whole-word hits do not fill the page. A word of at
 # least MIN_PREFIX characters also matches longer words that start with it in title, filename,
 # tags, note and URL, never in extracted text. In a plain word query of at most
 # MAX_SUBSTRING_WORDS words, a word of at least MIN_SUBSTRING characters is also searched inside
-# filenames, which a trigram index supports; shorter words cannot use it.
+# the names of an item (filename, title, tags; item.search_names, migration 0007), which a
+# trigram index supports; shorter words cannot use it.
 MIN_PREFIX = 2
 MIN_SUBSTRING = 3
 MAX_SUBSTRING_WORDS = 5
+# Whole-word ranking reads each match's large vector. Per score tier only the newest RANK_CAP
+# matches are ranked by term frequency; older ones in that tier follow newest first (ADR-0026).
+RANK_CAP = 500
 _LIKE_SPECIAL = re.compile(r"([\\%_])")
 HEADLINE_TEXT = (
     "coalesce(title, '') || E'\\n' || coalesce(user_note, '') || E'\\n' || "
@@ -79,26 +92,66 @@ EXACT_SQL = (
     "lower(btrim(coalesce(item.original_filename, ''))), "
     "lower(regexp_replace(coalesce(item.original_filename, ''), '\\.[^.]+$', '')))"
 )
-SCORE_SQL = (
+# The tiers are read from the small head vector, which holds the same title, name, tag, note
+# and URL lexemes as search_vector; only the term-frequency rank needs the large vector.
+TIER_SQL = (
     f"(CASE WHEN {EXACT_SQL} THEN 8 ELSE 0 END "
-    "+ CASE WHEN item.search_vector @@ q.a_q THEN 4 ELSE 0 END "
-    "+ CASE WHEN item.search_vector @@ q.b_q THEN 2 ELSE 0 END "
-    "+ CASE WHEN item.search_vector @@ q.c_q THEN 1 ELSE 0 END "
-    "+ ts_rank(item.search_vector, q.full_q, 33))"
+    "+ CASE WHEN item.search_head @@ q.a_q THEN 4 ELSE 0 END "
+    "+ CASE WHEN item.search_head @@ q.b_q THEN 2 ELSE 0 END "
+    "+ CASE WHEN item.search_head @@ q.c_q THEN 1 ELSE 0 END)"
 )
 # Fields holding at least one positive query word, checked for the result page only.
 # Extracted text is checked on the stored vector (weight D) instead of being parsed again.
 _CONFIG = "bag_language_config(item.language)"
 
 
-def _matched_fields_sql(words: str, filename_extra: str = "") -> str:
-    """Fields whose own text contains a word of the query column `words` of the q CTE."""
+# A name that contains a substring pattern of the query (see substring_patterns).
+_LIKES_SQL = (
+    "EXISTS (SELECT 1 FROM unnest(%(likes)s::text[]) AS w WHERE {key} LIKE bag_like_key(w))"
+)
+
+
+def _matched_fields_sql(words: str, *, likes: bool = False) -> str:
+    """Fields whose own text contains a word of the query column `words` of the q CTE.
+
+    With `likes`, a title, filename or tag that contains a substring pattern counts too.
+    """
+
+    def names(key: str) -> str:
+        return " OR " + _LIKES_SQL.format(key=key) if likes else ""
+
+    tag_names = (
+        "EXISTS (SELECT 1 FROM item_tag it JOIN tag t ON (t.owner_id = it.owner_id "
+        "AND t.id = it.tag_id) WHERE it.owner_id = item.owner_id AND it.item_id = item.id "
+        "AND " + _LIKES_SQL.format(key="bag_name_key(t.name)") + ")"
+    )
     hits = (
-        ("title", f"bag_text_vector(item.title, {_CONFIG}, 'A') @@ q.{words}"),
-        ("filename", f"bag_name_vector(item.original_filename, 'A') @@ q.{words}{filename_extra}"),
-        ("tag", f"bag_item_tags_vector(item.owner_id, item.id) @@ q.{words}"),
-        ("note", f"bag_text_vector(item.user_note, {_CONFIG}, 'C') @@ q.{words}"),
-        ("url", f"bag_text_vector(item.source_url, {_CONFIG}, 'C') @@ q.{words}"),
+        (
+            "title",
+            f"(item.title IS NOT NULL "
+            f"AND bag_field_vector(item.title, {_CONFIG}, 'A') @@ q.{words})"
+            + names("bag_name_key(item.title)"),
+        ),
+        (
+            "filename",
+            f"bag_name_vector(item.original_filename, 'A') @@ q.{words}"
+            + names("bag_name_key(item.original_filename)"),
+        ),
+        (
+            "tag",
+            f"bag_item_tags_vector(item.owner_id, item.id) @@ q.{words}"
+            + (" OR " + tag_names if likes else ""),
+        ),
+        (
+            "note",
+            f"(item.user_note IS NOT NULL "
+            f"AND bag_field_vector(item.user_note, {_CONFIG}, 'C') @@ q.{words})",
+        ),
+        (
+            "url",
+            f"(item.source_url IS NOT NULL "
+            f"AND bag_url_vector(item.source_url, {_CONFIG}) @@ q.{words})",
+        ),
         ("content", "item.search_vector @@ q.d_q"),
     )
     return (
@@ -125,7 +178,91 @@ PARTIAL_QUERIES_CTE = (
     f"SELECT {QUERY_SQL} AS full_q, {TYPED_SQL} AS typed_q) f"
     ") a)"
 )
-FILENAME_KEY = "bag_filename_key(item.original_filename)"
+
+
+# Characters a query word may start or end with that the names never need highlighted.
+_EDGE = re.compile(r"^[^\w]+|[^\w]+$")
+_TRANSLIT = {"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"}
+
+
+def _needles(q: str) -> list[str]:
+    """The positive words of a query, and their parts at separators, for name highlighting."""
+    words = []
+    for word in q.split():
+        if word.startswith("-") or word.lower() == "or":
+            continue
+        word = _EDGE.sub("", word.replace('"', ""))
+        words += [word, *re.split(r"[-_.]", word)]
+    return sorted({w for w in words if len(w) >= MIN_PREFIX}, key=len, reverse=True)
+
+
+def _folded(value: str, translit: bool) -> tuple[str, list[int]]:
+    """`value` lowercased without accents, and for every folded character its source index."""
+    out: list[str] = []
+    origin: list[int] = []
+    for index, char in enumerate(value):
+        lowered = char.lower()
+        if translit and lowered in _TRANSLIT:
+            folded = _TRANSLIT[lowered]
+        else:
+            decomposed = unicodedata.normalize("NFKD", lowered)
+            folded = "".join(c for c in decomposed if not unicodedata.combining(c)) or lowered
+            if lowered == "ß":
+                folded = "ss"
+        out.append(folded)
+        origin += [index] * len(folded)
+    return "".join(out), origin
+
+
+def highlight(value: str, needles: list[str]) -> str | None:
+    """`value` with every occurrence of a needle marked «like this», or None without one.
+
+    Case, accents and the German transliteration are ignored, as in the substring search.
+    """
+    spans: list[tuple[int, int]] = []
+    for translit in (True, False):
+        text, origin = _folded(value, translit)
+        for needle in needles:
+            key, _ = _folded(needle, translit)
+            start = text.find(key)
+            while key and start >= 0:
+                spans.append((origin[start], origin[start + len(key) - 1] + 1))
+                start = text.find(key, start + 1)
+    if not spans:
+        return None
+    merged: list[list[int]] = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    parts, last = [], 0
+    for start, end in merged:
+        parts += [value[last:start], "«", value[start:end], "»"]
+        last = end
+    return "".join([*parts, value[last:]])
+
+
+def _with_name_snippet(row: dict[str, Any], needles: list[str]) -> dict[str, Any]:
+    """Shows a title, filename or tag hit when the text snippet highlights nothing.
+
+    ts_headline only sees title, note, URL and text, as words; filenames, tags and substrings
+    of names would otherwise only appear in matched_fields.
+    """
+    if "«" in (row.get("snippet") or ""):
+        return row
+    fields = set(row.get("matched_fields") or ())
+    names = []
+    if "title" in fields and row.get("title"):
+        names.append(row["title"])
+    if "filename" in fields and row.get("original_filename"):
+        names.append(row["original_filename"])
+    if "tag" in fields:
+        names += row.get("tags") or []
+    marked = [m for m in (highlight(name, needles) for name in names) if m is not None]
+    if marked:
+        row["snippet"] = " · ".join(marked)
+    return row
 
 
 def _summary(row: dict[str, Any]) -> dict[str, Any]:
@@ -242,10 +379,21 @@ def _result_sql(hit: str, *, queries: str, rank: str, headline_query: str, field
 
 
 def _whole_word_sql(clauses: list[str]) -> str:
+    # Tier first, then the term-frequency rank (0 to 1, damped by document length) for the
+    # newest RANK_CAP matches of each tier; the CASE skips reading the large vector of the rest.
+    tiered = (
+        f"SELECT item.id AS hit_id, item.search_vector AS vector, {TIER_SQL} AS tier "
+        f"FROM item CROSS JOIN q WHERE {' AND '.join(clauses)}"
+    )
+    numbered = (
+        "SELECT t.*, row_number() OVER (PARTITION BY t.tier ORDER BY t.hit_id DESC) AS position "
+        f"FROM ({tiered}) t"
+    )
     hit = (
-        f"SELECT item.id AS hit_id, {SCORE_SQL} AS hit_rank "
-        f"FROM item CROSS JOIN q WHERE {' AND '.join(clauses)} "
-        "ORDER BY hit_rank DESC, item.id DESC LIMIT %(limit)s OFFSET %(offset)s"
+        "SELECT m.hit_id, m.tier + CASE WHEN m.position <= %(rank_cap)s "
+        "THEN ts_rank(m.vector, q.full_q, 33) ELSE 0 END AS hit_rank "
+        f"FROM ({numbered}) m CROSS JOIN q "
+        "ORDER BY hit_rank DESC, m.hit_id DESC LIMIT %(limit)s OFFSET %(offset)s"
     )
     return _result_sql(
         hit,
@@ -276,7 +424,9 @@ def _partial_sql(
     if likes:
         arms.append(
             "("
-            + " AND ".join(f"{FILENAME_KEY} LIKE lower(%(like_{i})s)" for i in range(len(likes)))
+            + " AND ".join(
+                f"item.search_names LIKE bag_like_key(%(like_{i})s)" for i in range(len(likes))
+            )
             + ")"
         )
     where = " AND ".join(
@@ -291,11 +441,6 @@ def _partial_sql(
         "+ ts_rank(item.search_head, q.guard_q, 33) / 32"
     )
     score = f"CASE WHEN {prefix} THEN {prefix_score} ELSE 0.25 END" if likes else prefix_score
-    filename = (
-        f" OR {FILENAME_KEY} LIKE ANY (SELECT lower(w) FROM unnest(%(likes)s::text[]) AS w)"
-        if likes
-        else ""
-    )
     hit = (
         f"SELECT item.id AS hit_id, {score} AS hit_rank FROM item CROSS JOIN q WHERE {where} "
         "ORDER BY hit_rank DESC, item.id DESC LIMIT %(limit)s OFFSET %(offset)s"
@@ -309,7 +454,7 @@ def _partial_sql(
         queries=f"{PARTIAL_QUERIES_CTE}, {whole_hit}",
         rank="hit.hit_rank",
         headline_query="q.prefix_q",
-        fields=_matched_fields_sql("field_q", filename),
+        fields=_matched_fields_sql("field_q", likes=bool(likes)),
     )
 
 
@@ -347,6 +492,7 @@ def search_items(
             "limit": limit + 1,
             "offset": offset,
             "options": HEADLINE_OPTIONS,
+            "rank_cap": RANK_CAP,
             "likes": likes,
             **{f"like_{i}": pattern for i, pattern in enumerate(likes)},
         }
@@ -368,7 +514,11 @@ def search_items(
                 skip = offset - (counted["n"] if counted else 0)
             params.update({"limit": needed, "offset": skip})
             rows += conn.execute(_partial_sql(clauses, whole, words, likes), params).fetchall()
-    results = [SearchResult.model_validate(_summary(row)) for row in rows[:limit]]
+    needles = _needles(q)
+    results = [
+        SearchResult.model_validate(_with_name_snippet(_summary(row), needles))
+        for row in rows[:limit]
+    ]
     return SearchPage(
         results=results,
         next_offset=offset + limit if len(rows) > limit else None,

@@ -76,9 +76,11 @@ def test_prefix_finds_tags_titles_notes_and_filenames(
     # Every word of the query has to be found, each as a prefix.
     assert found(client, headers, "urlaub 2027") == [noted]
     assert found(client, headers, "urlaub reise") == []
-    # A prefix does not match a shorter word, and a prefix of a word does not skip its start.
+    # A prefix does not match a shorter word. Inside a word only the names (title, filename,
+    # tags) are searched for substrings (ADR-0026); the note 'Urlaubsplanung' is not.
     assert found(client, headers, "urlaubstestx") == []
-    assert found(client, headers, "laub") == []
+    assert found(client, headers, "laub") == [tagged]
+    assert fields(client, headers, "laub") == {tagged: ["tag"]}
     assert head_is_current(settings)
 
 
@@ -120,9 +122,10 @@ def test_unicode_in_prefixes_and_names(
     for query in ("über", "ÜBER", "ueber"):
         assert found(client, headers, query) == [named, umlaut], query
     assert set(found(client, headers, "größ")) == {umlaut, named}
-    # Filenames and tags are also indexed transliterated; titles are not.
-    assert found(client, headers, "groess") == [named]
-    assert found(client, headers, "uebers") == [named]
+    # Filenames and tags are also indexed transliterated as words; titles only as names for
+    # substrings, which rank after prefix hits (ADR-0026).
+    assert found(client, headers, "groess") == [named, umlaut]
+    assert found(client, headers, "uebers") == [named, umlaut]
     assert found(client, headers, "ueberr") == [umlaut]
     assert found(client, headers, "caf") == [accent]
     assert found(client, headers, "CRÈ") == [accent]
@@ -131,7 +134,8 @@ def test_unicode_in_prefixes_and_names(
     assert found(client, headers, "日本") == [cjk]
     # Emoji and symbols are harmless.
     assert found(client, headers, "🙂") == []
-    assert fields(client, headers, "über") == {named: ["filename"], umlaut: ["tag"]}
+    # The title has 'über' inside a word, which a name substring reports (ADR-0026).
+    assert fields(client, headers, "über") == {named: ["filename"], umlaut: ["title", "tag"]}
     assert fields(client, headers, "größ") == {umlaut: ["title"], named: ["filename"]}
 
 
@@ -592,7 +596,7 @@ def test_migration_backfills_and_downgrades_search_head(
                 "SELECT indexname FROM pg_indexes WHERE tablename = 'item'"
             ).fetchall()
         }
-    assert {"item_search_idx", "item_search_head_idx", "item_filename_trgm_idx"} <= indexes
+    assert {"item_search_idx", "item_search_head_idx", "item_names_trgm_idx"} <= indexes
 
 
 def _seed(settings: Settings, owner: Any, count: int) -> tuple[Any, Any]:

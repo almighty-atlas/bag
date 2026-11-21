@@ -3,8 +3,9 @@
 Migration `0001_foundation` creates the tables below; `0002_jobs` adds `job`,
 `0003_active_job` its unique active-job index, `0004_sessions` the web login
 columns and `session` table, `0005_search_fields` the trigger-maintained weighted
-search vector and `0006_search_partial` the head vector and filename trigram index
-for prefix and substring search (both below). All
+search vector, `0006_search_partial` the head vector and filename trigram index
+for prefix and substring search, and `0007_search_followups` accent folding, URL words and
+the `search_names` substring keys (all below). All
 have server-generated UUIDv7 primary keys. Timestamps use `timestamptz`; API
 connections use UTC. `user` is the ownership root; every other table has `owner_id`.
 
@@ -125,9 +126,13 @@ ordering; `item_recent_idx` remains for future `created_at` ordering.
 and C lexemes of `search_vector` (title and filename, tags, note and URL) and no extracted
 text, with its own GIN index `item_search_head_idx`. The same trigger functions write it
 in the same statement as `search_vector`; it is never written by application code and is
-not exported. `item_filename_trgm_idx` is a `pg_trgm` GIN index over
-`bag_filename_key(original_filename)`, the lowercased name plus a transliterated copy
-(`ä ö ü ß` to `ae oe ue ss`). `bag_prefix_query` turns a parsed query into prefix operands
+not exported. `item.search_names` (ADR-0026, `0007_search_followups`) is text with one line
+pair per name of the item (filename, title, each tag): the lowercased, accent-folded name and
+its folded `ä ö ü ß` transliteration (`bag_name_key`). The same triggers write it; it is not
+exported. `item_names_trgm_idx` is a `pg_trgm` GIN index over it and replaced
+`item_filename_trgm_idx`. Since `0007` the vectors also hold accent-free forms of title, note,
+URL, filename and tag words, and the words of URL host and path; `search_vector` stores the
+extracted text (D) before the other fields, which lets tag changes keep that part. `bag_prefix_query` turns a parsed query into prefix operands
 (typed words of at least two characters; exclusions stay exact).
 
 Deletion is soft: `DELETE` sets `deleted_at` (kept on repeats), restore clears it,
@@ -170,3 +175,11 @@ size of the item vectors, 3.6 MB of index and 2.3 MB of trigram index at 30,000 
 about 0.35 ms to every item write and tag change. Its downgrade restores the trigger
 functions of `0005`, drops the column, both indexes and the helper functions, and leaves
 `pg_trgm` installed.
+
+`0007_search_followups` creates the `unaccent` extension (trusted; shipped with `postgres:17`),
+adds `search_names`, rebuilds `search_vector`, `search_head` and `search_names` of every item in
+one transaction and swaps the trigram index (about 3.5 ms per item of 10 KB text; 1 min 47 s for
+30,000 items on a development host). Same procedure as `0006`: back up, stop or idle API and
+worker, `bag migrate`, `VACUUM ANALYZE item`, start the new containers. Its downgrade restores
+the functions of `0006`, rebuilds every vector with them, drops `search_names` and its index,
+recreates `item_filename_trgm_idx` and leaves `unaccent` installed.

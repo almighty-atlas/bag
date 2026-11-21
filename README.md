@@ -89,9 +89,11 @@ Both API and worker expose these endpoints.
 
 Update existing installations. This version adds a migration for the job queue,
 another (`0005_search_fields`) that re-indexes every item for filename and tag search
-and a third (`0006_search_partial`, creates the `pg_trgm` extension, backfills a second
-small search vector and builds two indexes) for prefix and substring search, each in one
-transaction (`0006` also needs `VACUUM ANALYZE item` afterwards), so back up first, stop or idle the API and worker, and run
+a third (`0006_search_partial`, creates the `pg_trgm` extension, backfills a second
+small search vector and builds two indexes) for prefix and substring search and a fourth
+(`0007_search_followups`, creates the `unaccent` extension and rebuilds every search vector)
+for accent folding, URL words and substrings in titles and tags, each in one
+transaction (`0006` and `0007` also need `VACUUM ANALYZE item` afterwards), so back up first, stop or idle the API and worker, and run
 `bag migrate` before starting the new containers; until then `/ready` reports
 `not_ready` on purpose. Tokens and data are preserved:
 
@@ -440,6 +442,13 @@ Compose stack under its own project name and ports, signs in through the web
 proxy, captures text, a private URL and a file, waits for processing, searches,
 downloads, trashes, restores, exports and tears everything down. Run it locally
 with Docker available; it never touches the `bag` project's volumes.
+
+`scripts/search_bench.py` times searches and a large tag rename on a synthetic Bag in a
+disposable database whose name ends in `_bench` or `_test` (ADR-0026):
+
+```sh
+uv run python scripts/search_bench.py postgresql://bag:bag-local-dev@127.0.0.1:5432/bag_bench --items 30000
+```
 
 For host-based development, with PostgreSQL running and `.env` configured, run the
 API and, in a second terminal, the worker:
