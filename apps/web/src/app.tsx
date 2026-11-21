@@ -6,6 +6,7 @@ import { ItemView } from "./item";
 import { Login } from "./login";
 import { Nav } from "./nav";
 import { Organize } from "./organize";
+import { Pins } from "./pins";
 import { SHARE_FIELDS, shareDraft, sharePayload, type SharePayload } from "./share";
 import { batchDraft, loadBatch, type ShareBatch } from "./share-store";
 import { Tokens } from "./tokens";
@@ -25,6 +26,7 @@ export type Route =
   | { name: "feed"; query: string; trashed: boolean; filters: Filters }
   | { name: "item"; id: string }
   | { name: "organize" }
+  | { name: "pins" }
   | { name: "tokens" }
   // A stored pending share (batch), or the legacy GET form that carries its fields in the URL.
   | { name: "share"; batch: string | null; payload: SharePayload };
@@ -43,6 +45,7 @@ export function parseRoute(hash: string): Route {
   if (itemMatch?.[1] !== undefined) return { name: "item", id: itemMatch[1] };
   if (path === "/tokens") return { name: "tokens" };
   if (path === "/organize") return { name: "organize" };
+  if (path === "/merkliste") return { name: "pins" };
   if (path === "/share") {
     const batch = params.get("batch") ?? "";
     return { name: "share", batch: BATCH_ID.test(batch) ? batch : null, payload: sharePayload(params) };
@@ -75,6 +78,7 @@ export function href(route: Route): string {
   if (route.name === "item") return `#/items/${route.id}`;
   if (route.name === "tokens") return "#/tokens";
   if (route.name === "organize") return "#/organize";
+  if (route.name === "pins") return "#/merkliste";
   if (route.name === "share") {
     const params = new URLSearchParams();
     if (route.batch) params.set("batch", route.batch);
@@ -139,6 +143,7 @@ export function App() {
         {route.name === "item" && <ItemView id={route.id} />}
         {route.name === "tokens" && <Tokens />}
         {route.name === "organize" && <Organize />}
+        {route.name === "pins" && <Pins />}
         {route.name === "feed" && <Feed route={route} share={null} />}
         {route.name === "share" && <SharePage batch={route.batch} payload={route.payload} />}
       </main>

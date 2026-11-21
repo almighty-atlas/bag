@@ -20,14 +20,15 @@ from bag.tokens import resolve_owner
 ITEM_FIELDS = (
     "id, owner_id, client_capture_id, kind, source, source_application, source_url, mime_type, "
     "language, original_filename, title, user_note, content, extracted_text, content_hash, "
-    "processing_status, metadata, created_at, captured_at, updated_at, deleted_at"
+    "processing_status, metadata, pinned_at, created_at, captured_at, updated_at, deleted_at"
 )
 ITEM_VALUES = (
     "%(id)s::uuid, %(owner_id)s::uuid, %(client_capture_id)s::uuid, %(kind)s, %(source)s, "
     "%(source_application)s, "
     "%(source_url)s, %(mime_type)s, %(language)s, %(original_filename)s, %(title)s, "
     "%(user_note)s, %(content)s, %(extracted_text)s, %(content_hash)s, %(processing_status)s, "
-    "%(metadata)s, %(created_at)s::timestamptz, %(captured_at)s::timestamptz, "
+    "%(metadata)s, %(pinned_at)s::timestamptz, %(created_at)s::timestamptz, "
+    "%(captured_at)s::timestamptz, "
     "%(updated_at)s::timestamptz, %(deleted_at)s::timestamptz"
 )
 

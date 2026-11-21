@@ -562,7 +562,9 @@ def test_migration_backfills_and_downgrades_search_head(
             ).fetchone()
         assert columns == {"n": 0} and functions == {"n": 0}
         # Version 0005 works as before: tag changes and edits still re-index the vector.
-        patch(client, headers, tagged, tags=["Ferientest"])
+        # (Direct SQL: the current API reads columns of later migrations.)
+        with connection(settings) as conn:
+            conn.execute("UPDATE tag SET name = 'Ferientest' WHERE name = 'Urlaubstest'")
         with connection(settings) as conn:
             legacy = uuid7()
             conn.execute(
