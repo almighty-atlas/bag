@@ -335,7 +335,9 @@ use only the authenticated thumbnail endpoint, with readable fallbacks), the tra
 kind, tag, collection and date, and a page to rename or delete tags and
 collections ("Tags & Sammlungen"). The layout is mobile-first: a compact menu on
 phones, capture and search first, filters in a collapsible section. Press `/` to jump to
-the search box. Build and start it after
+the search box. Paste (`Strg+V`/`⌘V`) an image or file to save it at once, or use the
+"Einfügen" button; pasted text lands in the capture box. The "⋯" menu of a feed entry and
+the item view open, download, copy or share it. Build and start it after
 setting a password:
 
 ```sh

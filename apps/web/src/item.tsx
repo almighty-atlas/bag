@@ -1,6 +1,8 @@
 import { useEffect, useState } from "preact/hooks";
 
-import { ApiError, api, contentUrl, snapshotUrl, type ItemDetail, type ProcessingRun } from "./api";
+import { ItemActions } from "./actions";
+import { ApiError, api, snapshotUrl, type ItemDetail, type ProcessingRun } from "./api";
+import { itemStatusLabel, kindLabel, languageLabel, processorLabel, runStatusLabel } from "./labels";
 import { Notice } from "./notice";
 import { Thumbnail, previewState, thumbnailAlt } from "./thumbnail";
 
@@ -134,14 +136,14 @@ export function ItemView({ id }: { id: string }) {
     location.hash = "#/";
   };
 
-  const hasOriginalFile = item.kind !== "text" && item.kind !== "url";
-
   return (
     <article class="detail">
       <p class="meta">
-        {item.kind} · erfasst {new Date(item.captured_at).toLocaleString()} · Status {item.processing_status}
-        {item.language && <> · Sprache {item.language}</>}
+        {kindLabel(item.kind)} · erfasst {new Date(item.captured_at).toLocaleString()} ·{" "}
+        {itemStatusLabel(item.processing_status)}
+        {item.language && <> · Sprache {languageLabel(item.language)}</>}
       </p>
+      <ItemActions item={item} />
       {imageState !== "none" && (
         <div class="detail-preview">
           <Thumbnail key={item.id} id={item.id} alt={thumbnailAlt(item)} state={imageState} variant="detail" />
@@ -179,16 +181,6 @@ export function ItemView({ id }: { id: string }) {
           <button type="submit" disabled={saving}>
             Speichern
           </button>
-          {hasOriginalFile && (
-            <a class="button" href={contentUrl(id)} download={item.original_filename ?? undefined}>
-              Original herunterladen
-            </a>
-          )}
-          {item.source_url && (
-            <a class="button" href={item.source_url} target="_blank" rel="noopener noreferrer nofollow">
-              Link öffnen
-            </a>
-          )}
           {item.kind === "url" && item.mime_type && (
             <a class="button" href={snapshotUrl(id)} download>
               Snapshot herunterladen
@@ -229,9 +221,9 @@ export function ItemView({ id }: { id: string }) {
           <tbody role="rowgroup">
             {runs.map((run) => (
               <tr key={run.processor} role="row">
-                <td role="cell">{run.processor}</td>
+                <td role="cell">{processorLabel(run.processor)}</td>
                 <td class={`status-${run.status}`} role="cell">
-                  {run.status}
+                  {runStatusLabel(run.status)}
                 </td>
                 <td role="cell">{run.attempts}×</td>
                 <td class="muted" role="cell">

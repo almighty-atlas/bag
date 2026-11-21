@@ -376,6 +376,16 @@ are "Erfasst von" / "Erfasst bis"). The native file input is visually hidden but
 focusable, and its label is the touch-sized "Dateien hochladen" button; picking files
 still uploads at once.
 
+Fast actions (ADR-0027): files and images pasted into the capture field, or anywhere on the
+feed outside a text field, upload at once through the same retry path (pasted images get a
+dated `Zwischenablage …` name); text pasted outside a field only fills the capture field. A
+secondary "Einfügen" button reads the clipboard where the browser allows it (`clipboard.ts`).
+Each feed row has a "⋯" `<details>` menu beside the row link, rendered only while open, and the
+detail view the same actions (`actions.tsx`): open a saved link, download the original, copy
+the text, link or the item's Bag link, and share through `navigator.share` (files only where
+`canShare` accepts them). Kinds, item and run states and processor names are shown as German
+labels (`labels.ts`); unknown values are shown as sent.
+
 Crashes may leave unpublished `.upload-*` files or published objects without a
 database reference. They are retained until `bag gc` removes them under the
 capture locks; retry can reuse a published object in the meantime. Never manually
@@ -437,8 +447,9 @@ See [TODO](../TODO.md) for actionable fixes and acceptance tests.
   authentication, multi-megabyte originals) and vitest tests of the line selection.
   The image cards and detail view have vitest component tests (happy-dom, mocked
   fetch); the text-card two-line clamp has none and was not checked in a browser.
-  There is still no image paste handler, contextual
-  copy/share/pin function, or compact mobile-first Shelf surface.
+  Clipboard paste and the open/copy/share/download actions exist since ADR-0027 (vitest
+  and one headless Chromium layout pass); there is still no pin function and no compact
+  mobile-first Shelf surface.
 - Original and fetched content are delivered as protected downloads or
   sandboxed snapshots. Images additionally get a re-encoded WebP thumbnail and
   an authenticated inline endpoint (ADR-0023). The web feed, search results and item
