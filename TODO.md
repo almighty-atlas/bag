@@ -19,10 +19,17 @@ Shelf is a view over persisted Bag items, not a second transport/store.
   3C (neutral relations) → 3D (local metadata). Linux DMS feasibility can
   begin after the Phase 3A API contract is reliable; Phase 5 closes the
   complete cross-device experience. Android/macOS tests begin in **3A**.
+- **Device scope for now (2026-11-21):** real-device checks run on the CachyOS
+  desktop, a MacBook (Safari) and an iPhone (Safari and the installed PWA).
+  Android, Windows, other browsers and screen readers other than VoiceOver are
+  deferred: their checks are collected under
+  [Deferred platform checks](#deferred-platform-checks) and do not block 3A/3B
+  for now.
 
 ## Phase 3A — Capture reliability and usable retrieval (first)
 
-- [ ] **Android POST Share Target:** reproduce shared URL + title + text,
+- [ ] **Android POST Share Target** (deferred, see
+      [Deferred platform checks](#deferred-platform-checks)): reproduce shared URL + title + text,
       plain text, image and file on a real Android browser/PWA. URL
       classification with extra title/text is fixed and covered by a vitest
       test that runs the real `sw.js` on a multipart POST in Node; still open:
@@ -48,8 +55,9 @@ Shelf is a view over persisted Bag items, not a second transport/store.
         tag approaches about 40,000 large items (ADR-0026).
       - Extracted text is neither accent-folded nor substring-searched; decide only with a
         measured need and cost.
-- [ ] **Immediate real-device smoke test:** Android Share→Bag; macOS browser
-      paste/save→Bag; refresh and retrieve from a second device. Check that
+- [ ] **Immediate real-device smoke test** (CachyOS, macOS, iPhone; Android
+      parts deferred): macOS browser paste/save→Bag, iPhone upload/paste→Bag;
+      refresh and retrieve from a second device. Check that
       saved text shows its excerpt in the feed (API and line selection are
       tested; the rendered card and its two-line clamp are not). Cover
       interrupted upload, auth expiry, server restart and accurate success,
@@ -62,7 +70,8 @@ Shelf is a view over persisted Bag items, not a second transport/store.
 **3A done when:** no silent share loss, wrongly categorized URL, false
 save acknowledgement or unintended same-action retry duplicate; text and
 filename retrieval work on actual clients (the API side of filename and tag
-retrieval is done and tested; the client check is the open item above).
+retrieval is done and tested; the client check is the open item above). For
+now "actual clients" means CachyOS, macOS and iPhone; Android follows later.
 
 ## Phase 3B — Secure previews and daily-use UI
 
@@ -169,6 +178,23 @@ mandatory cloud providers or unwanted overwrite of user input.
 - [ ] End-to-end Linux ↔ macOS ↔ Android: URL, text, file, search,
       original retrieval; token error, size/timeout/offline feedback,
       repeated shares and successful refresh on second device.
+
+## Deferred platform checks
+
+Not in the current device scope (see the rules above); pick up when an Android
+phone or another platform is at hand. Nothing here is verified yet.
+
+- [ ] **Android Share Target:** shared URL + title + text, plain text, image and
+      file from a real Android browser/PWA; two shares in a row (one saved, one
+      discarded); an app update with unsaved shares; a test in an actual browser
+      service worker (today only the real `sw.js` in Node).
+- [ ] **Android UI:** image cards, detail preview and feed self-refresh (tab
+      hidden/visible) in Chrome; paste by long press; sharing files from the
+      installed PWA; Merkliste after a reload.
+- [ ] **Other browsers and assistive tech:** a second Linux browser, Windows,
+      TalkBack and Orca passes of the menu, Merken toggle and undo.
+- [ ] **Phase 5 Android legs:** Android system share in the end-to-end
+      Linux ↔ macOS ↔ Android run.
 
 ## Later — separate approvals, not current feature work
 
